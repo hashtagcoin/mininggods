@@ -1,0 +1,40 @@
+{
+  "name": "mining-gods-server",
+  "version": "1.0.0",
+  "description": "Mining Gods Game Server - Colyseus-based multiplayer-ready game server",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "monitor": "node dist/index.js --monitor"
+  },
+  "keywords": [
+    "colyseus",
+    "game-server",
+    "mining-gods",
+    "typescript"
+  ],
+  "author": "Mining Gods Team",
+  "license": "MIT",
+  "dependencies": {
+    "@colyseus/monitor": "^0.16.7",
+    "@colyseus/playground": "^0.16.4",
+    "@colyseus/schema": "^3.0.39",
+    "@dimforge/rapier3d-compat": "^0.17.3",
+    "@types/noisejs": "^2.1.0",
+    "colyseus": "^0.16.4",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "noisejs": "^2.1.0",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
