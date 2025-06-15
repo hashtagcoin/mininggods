@@ -21,6 +21,7 @@ import Scene3D from './Scene3D';
 import HUD from './HUD';
 import FleetMenu from './FleetMenu';
 import GaragePanel from './GaragePanel';
+import Minimap from './Minimap';
 import { useGameStore } from '../store/gameStore';
 
 // Full screen slide transition for panels
@@ -118,6 +119,7 @@ function PanelDialog({ open, onClose, title, children }: PanelDialogProps) {
 function MainGame() {
   const { isConnected, isConnecting, connectToServer, initializeGame } = useGameStore();
   const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [showMinimap, setShowMinimap] = useState(true);
   const theme = useTheme();
 
   // Auto-connect on component mount
@@ -199,15 +201,26 @@ function MainGame() {
         left: 0,
         width: '100%',
         height: '100%',
-        zIndex: 10,
-        pointerEvents: 'none'
+        zIndex: 2,
+        pointerEvents: 'none',
+        '& > *': {
+          pointerEvents: 'auto'
+        }
       }}>
-        <HUD
-          onOpenFleet={() => handleOpenPanel('fleet')}
-          onOpenGarage={() => handleOpenPanel('garage')}
-          onOpenMap={() => handleOpenPanel('map')}
+        <HUD 
+          onOpenFleet={() => handleOpenPanel('fleet')} 
+          onOpenGarage={() => handleOpenPanel('garage')} 
+          onOpenMap={() => handleOpenPanel('map')} 
         />
       </Box>
+
+      {/* Minimap Overlay */}
+      {isConnected && (
+        <Minimap 
+          isVisible={showMinimap} 
+          onClose={() => setShowMinimap(false)} 
+        />
+      )}
 
       {/* Panel Dialogs */}
       <PanelDialog
