@@ -46,7 +46,8 @@ const mockVehicles = [
     efficiency: 85,
     miningPower: 12,
     speed: 8,
-    image: '/assets/vehicles/hauler_mk1.png'
+    image: '/assets/vehicles/hauler_mk1.png',
+    ownerId: 'player_001'
   },
   {
     id: 'vehicle_002', 
@@ -62,7 +63,8 @@ const mockVehicles = [
     efficiency: 94,
     miningPower: 18,
     speed: 15,
-    image: '/assets/vehicles/miner_v2.png'
+    image: '/assets/vehicles/miner_v2.png',
+    ownerId: 'player_001'
   },
   {
     id: 'vehicle_003',
@@ -78,7 +80,8 @@ const mockVehicles = [
     efficiency: 88,
     miningPower: 6,
     speed: 22,
-    image: '/assets/vehicles/scout_x9.png'
+    image: '/assets/vehicles/scout_x9.png',
+    ownerId: 'player_002'
   }
 ];
 
@@ -104,62 +107,84 @@ interface VehicleCardProps {
   onUpgrade: (vehicleId: string) => void;
 }
 
-function VehicleCard({ vehicle, onDeploy, onRecall, onUpgrade }: VehicleCardProps) {
+const VehicleCard: React.FC<VehicleCardProps> = ({ vehicle, onDeploy, onRecall, onUpgrade }) => {
+  const { gameState, myPlayerId, selectedVehicleId, selectVehicle } = useGameStore();
+  
+  const isSelected = selectedVehicleId === vehicle.id;
+  const isMyVehicle = vehicle.ownerId === myPlayerId;
+
+  const handleCardClick = () => {
+    if (isMyVehicle) {
+      selectVehicle(isSelected ? null : vehicle.id);
+    }
+  };
+
   const statusCfg = statusConfig[vehicle.status as keyof typeof statusConfig];
   const typeCfg = typeConfig[vehicle.type as keyof typeof typeConfig];
   const StatusIcon = statusCfg.icon;
   const TypeIcon = typeCfg.icon;
 
   return (
-    <Card
-      sx={{
-        background: 'linear-gradient(135deg, rgba(15, 15, 35, 0.95) 0%, rgba(26, 26, 46, 0.95) 100%)',
-        border: '1px solid rgba(255, 107, 53, 0.2)',
-        borderRadius: 2,
-        transition: 'all 0.3s ease',
-        '&:hover': {
-          borderColor: 'rgba(255, 107, 53, 0.4)',
-          transform: 'translateY(-2px)',
-          boxShadow: '0 8px 25px rgba(255, 107, 53, 0.15)'
-        }
+    <Card 
+      sx={{ 
+        height: '100%',
+        cursor: isMyVehicle ? 'pointer' : 'default',
+        border: isSelected ? 2 : 1,
+        borderColor: isSelected ? 'primary.main' : 'divider',
+        backgroundColor: isSelected ? 'action.selected' : 'background.paper',
+        '&:hover': isMyVehicle ? {
+          backgroundColor: isSelected ? 'action.selected' : 'action.hover',
+          borderColor: 'primary.light'
+        } : {}
       }}
+      onClick={handleCardClick}
     >
-      {/* Vehicle Image/Avatar */}
-      <Box sx={{ position: 'relative', p: 2, pb: 0 }}>
-        <Avatar
-          sx={{
-            width: 80,
-            height: 80,
-            bgcolor: typeCfg.color,
-            margin: '0 auto',
-            fontSize: '2rem'
-          }}
-        >
-          <TypeIcon />
-        </Avatar>
-        
-        {/* Status Badge */}
-        <Chip
-          icon={<StatusIcon />}
-          label={statusCfg.label}
-          size="small"
-          sx={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            bgcolor: statusCfg.color,
-            color: '#ffffff',
-            '& .MuiChip-icon': { color: '#ffffff' }
-          }}
-        />
-      </Box>
+      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+        {/* Vehicle Header with Selection Indicator */}
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            {vehicle.name}
+          </Typography>
+          {isSelected && (
+            <Chip 
+              label="SELECTED" 
+              size="small" 
+              color="primary" 
+              sx={{ ml: 1 }}
+            />
+          )}
+        </Box>
 
-      <CardContent sx={{ pt: 1 }}>
-        {/* Vehicle Name & Type */}
-        <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600, mb: 1, textAlign: 'center' }}>
-          {vehicle.name}
-        </Typography>
-        
+        {/* Vehicle Image/Avatar */}
+        <Box sx={{ position: 'relative', p: 2, pb: 0 }}>
+          <Avatar
+            sx={{
+              width: 80,
+              height: 80,
+              bgcolor: typeCfg.color,
+              margin: '0 auto',
+              fontSize: '2rem'
+            }}
+          >
+            <TypeIcon />
+          </Avatar>
+          
+          {/* Status Badge */}
+          <Chip
+            icon={<StatusIcon />}
+            label={statusCfg.label}
+            size="small"
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              bgcolor: statusCfg.color,
+              color: '#ffffff',
+              '& .MuiChip-icon': { color: '#ffffff' }
+            }}
+          />
+        </Box>
+
         <Typography variant="body2" sx={{ color: '#b0b0b0', textAlign: 'center', mb: 2 }}>
           {vehicle.type.toUpperCase()} • Location: ({vehicle.location.x}, {vehicle.location.z})
         </Typography>
@@ -306,7 +331,7 @@ function VehicleCard({ vehicle, onDeploy, onRecall, onUpgrade }: VehicleCardProp
 }
 
 function FleetMenu() {
-  const { gameState, isConnected } = useGameStore();
+  const { gameState, isConnected, selectedVehicleId, selectVehicle } = useGameStore();
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
 
   const handleDeploy = (vehicleId: string) => {

@@ -69,6 +69,18 @@ export class GameClient {
     }
   }
 
+  moveVehicle(vehicleId: string, x: number, y: number, z: number = 0): void {
+    if (this.room) {
+      this.room.send("move_vehicle", { vehicleId, x, y, z });
+    }
+  }
+
+  assignVehicle(vehicleId: string, targetId: string, action: string = "mining"): void {
+    if (this.room) {
+      this.room.send("assign_vehicle", { vehicleId, targetId, action });
+    }
+  }
+
   leaveGame(): void {
     if (this.room) {
       this.room.leave();

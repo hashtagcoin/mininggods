@@ -243,7 +243,7 @@ export class GameRoom extends Room<GameState> {
     if (vehicle && vehicle.ownerId === playerId) {
       vehicle.x = data.x;
       vehicle.z = data.z;
-      vehicle.y = data.y || 0;
+      vehicle.y = 0; // Always keep vehicles on ground level
       vehicle.status = "moving";
     }
   }

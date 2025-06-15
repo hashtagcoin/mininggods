@@ -60,34 +60,127 @@ function PlayerAvatar({
   );
 }
 
+// Vehicle Component
+function Vehicle({ 
+  vehicle, 
+  isSelected = false 
+}: { 
+  vehicle: { id: string; name: string; x: number; y: number; z: number; type: string; status: string }, 
+  isSelected?: boolean 
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const { selectVehicle, selectedVehicleId } = useGameStore();
+  const [hovered, setHovered] = useState(false);
+  
+  // Animate the vehicle slightly for visual feedback
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.position.y = vehicle.y + Math.sin(state.clock.elapsedTime * 3) * 0.05;
+    }
+  });
+
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    selectVehicle(isSelected ? null : vehicle.id);
+  };
+
+  // Vehicle colors by type
+  const getVehicleColor = () => {
+    switch (vehicle.type) {
+      case 'miner': return '#ff6b35';
+      case 'hauler': return '#2196f3';
+      case 'scout': return '#9c27b0';
+      default: return '#4caf50';
+    }
+  };
+
+  return (
+    <group position={[vehicle.x, vehicle.y, vehicle.z]}>
+      {/* Vehicle Body */}
+      <mesh 
+        ref={meshRef} 
+        castShadow
+        onClick={handleClick}
+        onPointerOver={() => setHovered(true)}
+        onPointerOut={() => setHovered(false)}
+      >
+        <boxGeometry args={[2, 1, 3]} />
+        <meshLambertMaterial 
+          color={getVehicleColor()} 
+          emissive={isSelected ? '#ffffff' : hovered ? '#333333' : '#000000'} 
+          emissiveIntensity={isSelected ? 0.3 : hovered ? 0.1 : 0}
+        />
+      </mesh>
+      
+      {/* Selection Ring */}
+      {isSelected && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.4, 0]}>
+          <ringGeometry args={[2, 2.5, 16]} />
+          <meshBasicMaterial color="#ff6b35" transparent opacity={0.8} />
+        </mesh>
+      )}
+      
+      {/* Vehicle Name Label */}
+      <Text
+        position={[0, 2, 0]}
+        fontSize={0.4}
+        color={isSelected ? '#ff6b35' : '#ffffff'}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {vehicle.name}
+      </Text>
+      
+      {/* Status Indicator */}
+      <Text
+        position={[0, 1.5, 0]}
+        fontSize={0.25}
+        color={vehicle.status === 'mining' ? '#4caf50' : vehicle.status === 'moving' ? '#ff9800' : '#757575'}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {vehicle.status.toUpperCase()}
+      </Text>
+    </group>
+  );
+}
+
 // Isometric Camera Controller
 function IsometricCameraController() {
   const { camera, gl } = useThree();
   
   useEffect(() => {
-    // Set up isometric camera position and angle
-    camera.position.set(10, 10, 10);
+    // Set initial camera position for isometric view
+    camera.position.set(25, 25, 25);
     camera.lookAt(0, 0, 0);
-    
-    // Use orthographic camera for true isometric view
-    if (camera instanceof THREE.PerspectiveCamera) {
-      const aspect = gl.domElement.clientWidth / gl.domElement.clientHeight;
-      const newCamera = new THREE.OrthographicCamera(
-        -10 * aspect, 10 * aspect,
-        10, -10,
-        0.1, 1000
-      );
-      newCamera.position.copy(camera.position);
-      newCamera.lookAt(0, 0, 0);
-    }
-  }, [camera, gl]);
+    camera.updateProjectionMatrix();
+  }, [camera]);
 
-  return null;
+  return (
+    <OrbitControls
+      camera={camera}
+      domElement={gl.domElement}
+      enablePan={true}
+      enableZoom={true}
+      enableRotate={true}
+      // Constrain rotation for isometric feel
+      minPolarAngle={Math.PI / 6}  // 30 degrees
+      maxPolarAngle={Math.PI / 3}  // 60 degrees
+      // Zoom limits
+      minDistance={10}
+      maxDistance={100}
+      // Smooth controls
+      enableDamping={true}
+      dampingFactor={0.05}
+      // Disable auto-rotate
+      autoRotate={false}
+    />
+  );
 }
 
 // Interactive Ground Plane for Movement
 function InteractiveGround() {
-  const { movePlayer, isConnected, myPlayerId } = useGameStore();
+  const { movePlayer, moveVehicle, isConnected, myPlayerId, selectedVehicleId } = useGameStore();
   const [hovered, setHovered] = useState(false);
   
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
@@ -95,8 +188,15 @@ function InteractiveGround() {
     
     const point = event.point;
     if (point) {
-      console.log(`Moving player to: ${point.x}, ${point.z}`);
-      movePlayer(point.x, point.z, 0);
+      if (selectedVehicleId) {
+        // Move selected vehicle
+        console.log(`Moving vehicle ${selectedVehicleId} to: ${point.x}, ${point.z}`);
+        moveVehicle(selectedVehicleId, point.x, point.z, 0);
+      } else {
+        // Move player
+        console.log(`Moving player to: ${point.x}, ${point.z}`);
+        movePlayer(point.x, point.z, 0);
+      }
     }
   };
 
@@ -120,7 +220,7 @@ function InteractiveGround() {
 
 // Main Scene Component
 function Scene3D() {
-  const { gameState, myPlayerId, isConnected } = useGameStore();
+  const { gameState, myPlayerId, isConnected, selectedVehicleId } = useGameStore();
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -152,17 +252,6 @@ function Scene3D() {
         {/* Isometric Camera Controller */}
         <IsometricCameraController />
         
-        {/* Camera Controls */}
-        <OrbitControls 
-          enablePan={true}
-          enableZoom={true}
-          enableRotate={true}
-          maxPolarAngle={Math.PI / 2}
-          minDistance={5}
-          maxDistance={50}
-          target={[0, 0, 0]}
-        />
-        
         {/* Grid */}
         <Grid 
           args={[100, 100]} 
@@ -184,6 +273,15 @@ function Scene3D() {
             key={playerId}
             player={player}
             isMe={playerId === myPlayerId}
+          />
+        ))}
+        
+        {/* Render All Vehicles */}
+        {isConnected && gameState?.vehicles && Array.from(gameState.vehicles.entries()).map(([vehicleId, vehicle]) => (
+          <Vehicle 
+            key={vehicleId}
+            vehicle={vehicle}
+            isSelected={vehicleId === selectedVehicleId}
           />
         ))}
         

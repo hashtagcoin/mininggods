@@ -15,11 +15,17 @@ interface GameStore {
   // Game client instance
   gameClient: GameClient | null;
   
+  // Vehicle selection state
+  selectedVehicleId: string | null;
+  
   // Actions
   initializeGame: () => void;
   connectToServer: (playerName?: string) => Promise<void>;
   disconnectFromServer: () => void;
   movePlayer: (x: number, y: number, z?: number) => void;
+  selectVehicle: (vehicleId: string | null) => void;
+  moveVehicle: (vehicleId: string, x: number, y: number, z?: number) => void;
+  assignVehicle: (vehicleId: string, targetId: string, action?: string) => void;
   
   // State updaters
   setGameState: (state: GameState) => void;
@@ -34,6 +40,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   gameState: null,
   myPlayerId: null,
   gameClient: null,
+  selectedVehicleId: null,
 
   // Initialize the game client
   initializeGame: () => {
@@ -95,7 +102,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isConnecting: false,
       gameState: null,
       myPlayerId: null,
-      connectionError: null
+      connectionError: null,
+      selectedVehicleId: null
     });
   },
 
@@ -104,6 +112,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { gameClient, isConnected } = get();
     if (gameClient && isConnected) {
       gameClient.movePlayer(x, y, z);
+    }
+  },
+
+  // Select a vehicle
+  selectVehicle: (vehicleId: string | null) => {
+    set({ selectedVehicleId: vehicleId });
+  },
+
+  // Move a vehicle
+  moveVehicle: (vehicleId: string, x: number, y: number, z?: number) => {
+    const { gameClient, isConnected } = get();
+    if (gameClient && isConnected) {
+      gameClient.moveVehicle(vehicleId, x, y, z);
+    }
+  },
+
+  // Assign a vehicle action
+  assignVehicle: (vehicleId: string, targetId: string, action?: string) => {
+    const { gameClient, isConnected } = get();
+    if (gameClient && isConnected) {
+      gameClient.assignVehicle(vehicleId, targetId, action);
     }
   },
 

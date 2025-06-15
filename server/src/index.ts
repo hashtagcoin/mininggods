@@ -6,7 +6,7 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 
-import { SimpleGameRoom } from "./rooms/SimpleGameRoom";
+import { GameRoom } from "./rooms/GameRoom";
 
 const port = Number(process.env.PORT || 2567);
 const app = express();
@@ -23,7 +23,7 @@ const gameServer = new Server({
 });
 
 // Register game room
-gameServer.define("game", SimpleGameRoom);
+gameServer.define("game", GameRoom);
 
 // Development tools (only in development)
 if (process.env.NODE_ENV !== "production") {
