@@ -1,4 +1,4 @@
-import Noise = require("noisejs");
+import { createNoise2D } from 'simplex-noise';
 
 export interface TerrainChunk {
   chunkX: number;
@@ -28,13 +28,26 @@ export interface WorldConfig {
 }
 
 export class WorldGenerator {
-  private noise: Noise;
+  private noise2D: (x: number, y: number) => number;
   private config: WorldConfig;
   private generatedChunks: Map<string, TerrainChunk> = new Map();
 
   constructor(config: WorldConfig) {
     this.config = config;
-    this.noise = new Noise(config.seed);
+    // Create seeded noise function for deterministic world generation
+    const seedRandom = this.createSeededRandom(config.seed);
+    this.noise2D = createNoise2D(seedRandom);
+  }
+
+  /**
+   * Create a seeded random number generator for deterministic noise
+   */
+  private createSeededRandom(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state * 9301 + 49297) % 233280;
+      return state / 233280;
+    };
   }
 
   /**
@@ -103,17 +116,17 @@ export class WorldGenerator {
     let frequency = 0.01;
     
     // Base terrain (large features)
-    height += this.noise.perlin2(x * frequency, z * frequency) * amplitude;
+    height += this.noise2D(x * frequency, z * frequency) * amplitude;
     
     // Hills and valleys (medium features)
     amplitude *= 0.5;
     frequency *= 2;
-    height += this.noise.perlin2(x * frequency, z * frequency) * amplitude;
+    height += this.noise2D(x * frequency, z * frequency) * amplitude;
     
     // Surface detail (small features)
     amplitude *= 0.5;
     frequency *= 2;
-    height += this.noise.perlin2(x * frequency, z * frequency) * amplitude;
+    height += this.noise2D(x * frequency, z * frequency) * amplitude;
     
     return height * heightScale;
   }
@@ -123,7 +136,7 @@ export class WorldGenerator {
    */
   private generateBiome(x: number, z: number, height: number): string {
     // Generate moisture using different noise offset
-    const moisture = this.noise.perlin2((x + 1000) * 0.005, (z + 1000) * 0.005);
+    const moisture = this.noise2D((x + 1000) * 0.005, (z + 1000) * 0.005);
     
     // Determine biome based on height and moisture
     if (height < -2) return "deep_valley";
@@ -186,7 +199,7 @@ export class WorldGenerator {
    */
   private determineOreType(height: number, biome: string, x: number, z: number): string | null {
     // Use noise to add randomness to ore distribution
-    const oreNoise = this.noise.perlin2(x * 0.02, z * 0.02);
+    const oreNoise = this.noise2D(x * 0.02, z * 0.02);
     
     // Biome-based ore preferences
     if (biome === "mountains") {

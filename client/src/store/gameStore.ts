@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { GameClient, GameState, Player } from "../services/GameClient";
+import { GameClient } from "../services/GameClient";
+import type { GameState } from "../services/GameClient";
 
 interface GameStore {
   // Connection state

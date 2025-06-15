@@ -17,6 +17,7 @@ export class GameClient {
   private client: Client;
   private room: Room<GameState> | null = null;
   private onStateUpdate: (state: GameState) => void;
+  private previousPlayerCount = 0;
 
   constructor(onStateUpdate: (state: GameState) => void) {
     this.client = new Client("ws://localhost:2567");
@@ -25,42 +26,39 @@ export class GameClient {
 
   async joinGame(playerName: string = "Player"): Promise<void> {
     try {
-      console.log("🔗 Connecting to Mining Gods server...");
+      console.log("Connecting to Mining Gods server...");
       
       this.room = await this.client.joinOrCreate<GameState>("game", {
         name: playerName
       });
 
-      console.log("✅ Successfully joined game room:", this.room.id);
+      console.log("Successfully joined game room:", this.room.id);
 
-      // Listen for state changes
       this.room.onStateChange((state) => {
-        console.log("🔄 Game state updated:", state);
+        console.log("Game state updated:", state);
+        
+        const currentPlayerCount = Object.keys(state.players).length;
+        if (currentPlayerCount > this.previousPlayerCount) {
+          console.log("Player joined the game");
+        } else if (currentPlayerCount < this.previousPlayerCount) {
+          console.log("Player left the game");
+        }
+        this.previousPlayerCount = currentPlayerCount;
+        
         this.onStateUpdate(state);
       });
 
-      // Listen for player join/leave events
-      this.room.state.players.onAdd((player, playerId) => {
-        console.log(`👤 Player joined: ${player.name} (${playerId})`);
-      });
-
-      this.room.state.players.onRemove((player, playerId) => {
-        console.log(`👋 Player left: ${player.name} (${playerId})`);
-      });
-
-      // Listen for room errors
       this.room.onError((code, message) => {
-        console.error("❌ Room error:", code, message);
+        console.error("Room error:", code, message);
       });
 
-      // Listen for room leave
       this.room.onLeave((code) => {
-        console.log("📤 Left room with code:", code);
+        console.log("Left room with code:", code);
         this.room = null;
       });
 
     } catch (error) {
-      console.error("❌ Failed to join game:", error);
+      console.error("Failed to join game:", error);
       throw error;
     }
   }

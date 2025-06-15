@@ -15,7 +15,7 @@ import {
   Close as CloseIcon,
   ArrowBack as BackIcon
 } from '@mui/icons-material';
-import { TransitionProps } from '@mui/material/transitions';
+import type { TransitionProps } from '@mui/material/transitions';
 
 import Scene3D from './Scene3D';
 import HUD from './HUD';
@@ -116,16 +116,19 @@ function PanelDialog({ open, onClose, title, children }: PanelDialogProps) {
 }
 
 function MainGame() {
-  const { isConnected, connectionStatus, connect } = useGameStore();
+  const { isConnected, isConnecting, connectToServer, initializeGame } = useGameStore();
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const theme = useTheme();
 
   // Auto-connect on component mount
   useEffect(() => {
-    if (!isConnected && connectionStatus !== 'connecting') {
-      connect('ws://localhost:2567');
+    if (!isConnected && !isConnecting) {
+      // Initialize the game client first
+      initializeGame();
+      // Then connect to server
+      connectToServer('Player');
     }
-  }, [isConnected, connectionStatus, connect]);
+  }, [isConnected, isConnecting, connectToServer, initializeGame]);
 
   const handleOpenPanel = (panelName: string) => {
     setActivePanel(panelName);
@@ -235,7 +238,7 @@ function MainGame() {
               Connecting to Mining Gods Server...
             </Typography>
             <Typography variant="body1" sx={{ color: '#b0b0b0' }}>
-              Status: {connectionStatus}
+              Status: {isConnecting ? 'Connecting...' : 'Disconnected'}
             </Typography>
           </Box>
         </Box>

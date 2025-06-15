@@ -425,7 +425,7 @@ function GaragePanel() {
 
       {/* Quick Stats */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={3}>
+        <Grid xs={3}>
           <Card sx={{ bgcolor: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 600 }}>
@@ -438,7 +438,7 @@ function GaragePanel() {
           </Card>
         </Grid>
         
-        <Grid item xs={3}>
+        <Grid xs={3}>
           <Card sx={{ bgcolor: 'rgba(255, 193, 7, 0.1)', border: '1px solid rgba(255, 193, 7, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#ffc107', fontWeight: 600 }}>
@@ -451,7 +451,7 @@ function GaragePanel() {
           </Card>
         </Grid>
 
-        <Grid item xs={3}>
+        <Grid xs={3}>
           <Card sx={{ bgcolor: 'rgba(255, 107, 53, 0.1)', border: '1px solid rgba(255, 107, 53, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#ff6b35', fontWeight: 600 }}>
@@ -464,7 +464,7 @@ function GaragePanel() {
           </Card>
         </Grid>
 
-        <Grid item xs={3}>
+        <Grid xs={3}>
           <Card sx={{ bgcolor: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#2196f3', fontWeight: 600 }}>

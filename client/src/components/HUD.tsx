@@ -106,7 +106,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
     >
       <CardContent sx={{ p: 2 }}>
         <Grid container spacing={2}>
-          <Grid item xs={3}>
+          <Grid xs={3}>
             <Box sx={{ textAlign: 'center' }}>
               <CreditsIcon sx={{ color: '#ffc107', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#ffc107', fontWeight: 600, fontSize: '1rem' }}>
@@ -118,7 +118,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid item xs={3}>
+          <Grid xs={3}>
             <Box sx={{ textAlign: 'center' }}>
               <OreIcon sx={{ color: '#4caf50', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#4caf50', fontWeight: 600, fontSize: '1rem' }}>
@@ -130,7 +130,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid item xs={3}>
+          <Grid xs={3}>
             <Box sx={{ textAlign: 'center' }}>
               <FleetIcon sx={{ color: '#2196f3', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#2196f3', fontWeight: 600, fontSize: '1rem' }}>
@@ -142,7 +142,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid item xs={3}>
+          <Grid xs={3}>
             <Box sx={{ textAlign: 'center' }}>
               <SpeedIcon sx={{ color: '#9c27b0', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#9c27b0', fontWeight: 600, fontSize: '1rem' }}>
