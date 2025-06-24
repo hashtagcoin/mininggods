@@ -167,7 +167,7 @@ export const useGameStore = create<GameStore>(logger((set, get) => ({
       // Add optimistic update
       const currentState = get();
       set({
-        optimisticVehiclePositions: { ...currentState.optimisticVehiclePositions, [myPlayerId]: { x, z } }
+        optimisticVehiclePositions: { ...(currentState.optimisticVehiclePositions || {}), [myPlayerId]: { x, z } }
       });
       
       // Send to server
@@ -220,7 +220,7 @@ export const useGameStore = create<GameStore>(logger((set, get) => ({
     // Add optimistic update
     const currentState = get();
     set({
-      optimisticVehiclePositions: { ...currentState.optimisticVehiclePositions, [vehicleId]: { x, z } }
+      optimisticVehiclePositions: { ...(currentState.optimisticVehiclePositions || {}), [vehicleId]: { x, z } }
     });
     
     console.log(`[STORE] Sending move command to server`);

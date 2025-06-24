@@ -99,6 +99,22 @@ Mining Gods is an isometric fleet-management strategy game with multiplayer-read
 - Added client-side smooth interpolation for X/Z only
 - Vehicles always stay on ground level
 
+### 4. **Terrain Collision System** ✅
+**Problem**: Vehicles clipping through terrain when moving on slopes
+**Solution Applied**:
+- Created invisible collision mesh 10 units above visual terrain
+- Collision mesh handles vehicle height calculations
+- Visual terrain retains normal maps and displacement
+- Vehicles positioned on visual terrain but use collision mesh for physics
+
+### 5. **Vehicle Terrain Alignment** ✅
+**Problem**: Vehicles need to match terrain angle on slopes
+**Solution Applied**:
+- Implemented getTerrainNormal function to calculate terrain slope
+- Applied pitch and roll rotation based on terrain normal
+- Added smooth damping (0.1 factor) for realistic transitions
+- Vehicles now properly tilt to match terrain angle
+
 ## 🎯 Next Priority Features
 
 ### Fleet Management Expansion

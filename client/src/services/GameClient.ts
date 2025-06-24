@@ -85,7 +85,7 @@ export class GameClient {
           }
         }
         
-        const currentPlayerCount = Object.keys(state.players).length;
+        const currentPlayerCount = state.players ? Object.keys(state.players).length : 0;
         if (currentPlayerCount > this.previousPlayerCount) {
           console.log("Player joined the game");
         } else if (currentPlayerCount < this.previousPlayerCount) {

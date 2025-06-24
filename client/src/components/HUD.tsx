@@ -211,7 +211,7 @@ function NotificationsPanel({ notifications, onMarkAsRead, onClearAll }: Notific
         </Box>
 
         <List sx={{ maxHeight: '300px', overflow: 'auto', p: 0 }}>
-          {notifications.length === 0 ? (
+          {!Array.isArray(notifications) || notifications.length === 0 ? (
             <ListItem>
               <ListItemText
                 primary="No notifications"
@@ -282,11 +282,11 @@ function HUD({ onOpenFleet, onOpenGarage, onOpenMap }: HUDProps) {
     totalVehicles: 3
   };
 
-  const unreadNotifications = notifications.filter(n => !n.read).length;
+  const unreadNotifications = Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0;
 
   const handleMarkAsRead = (id: string) => {
     setNotifications(prev => 
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
+      Array.isArray(prev) ? prev.map(n => n.id === id ? { ...n, read: true } : n) : []
     );
   };
 

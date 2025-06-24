@@ -31,9 +31,34 @@ const PlayerAvatar = React.memo(({
   isMe?: boolean 
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  
+  // Calculate floating position above terrain
+  const playerPosition = useMemo(() => {
+    const getHeight = (window as any).getTerrainHeight;
+    if (getHeight) {
+      const terrainHeight = getHeight(player.x, 0); // Use player.x and z=0
+      const visualTerrainHeight = terrainHeight - 2.0; // Subtract collision offset
+      const floatHeight = 5; // Float 5 units above terrain
+      return [player.x, visualTerrainHeight + floatHeight, 0];
+    }
+    return [player.x, player.y + 5, 0]; // Default float height
+  }, [player.x, player.y]);
+  
+  // Add floating animation
+  useFrame((state) => {
+    if (groupRef.current) {
+      // Gentle floating motion
+      const time = state.clock.elapsedTime;
+      groupRef.current.position.y = playerPosition[1] + Math.sin(time * 2) * 0.5;
+      
+      // Slow rotation for visual interest
+      groupRef.current.rotation.y = time * 0.5;
+    }
+  });
   
   return (
-    <group position={[player.x, player.y, 0]}>
+    <group ref={groupRef} position={playerPosition as [number, number, number]}>
       {/* Player Cube */}
       <mesh ref={meshRef} castShadow>
         <boxGeometry args={[1, 2, 1]} />
@@ -43,6 +68,25 @@ const PlayerAvatar = React.memo(({
           emissiveIntensity={0.2}
         />
       </mesh>
+      
+      {/* Floating ring effect */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -1.5, 0]}>
+        <torusGeometry args={[1.5, 0.1, 8, 24]} />
+        <meshBasicMaterial 
+          color={isMe ? '#ff6b35' : '#4CAF50'}
+          transparent
+          opacity={0.3}
+        />
+      </mesh>
+      
+      {/* Energy glow underneath */}
+      <pointLight
+        color={isMe ? '#ff6b35' : '#4CAF50'}
+        intensity={0.5}
+        distance={8}
+        decay={2}
+        position={[0, -2, 0]}
+      />
       
       {/* Only show labels for selected/nearby players to reduce text rendering cost */}
       {isMe && (
@@ -76,7 +120,7 @@ const PlayerAvatar = React.memo(({
 });
 
 // Terrain Component - Lunar surface with PBR materials
-function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => void }) {
+function Terrain({ onClick, showCollisionMesh = false }: { onClick?: (event: ThreeEvent<MouseEvent>) => void; showCollisionMesh?: boolean }) {
   const meshRef = useRef<THREE.Mesh>(null);
   
   console.log('[Terrain] Component rendering');
@@ -113,18 +157,9 @@ function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => voi
       (err) => console.error('[Terrain] Failed to load displacement map:', err)
     );
     
-    // Create normal map from displacement map
-    const normalMap = useMemo(() => {
-      // Create a canvas to generate normal map from displacement
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      const context = canvas.getContext('2d');
-      
-      // For now, use displacement map directly
-      // In production, you'd convert displacement to normal map
-      return displacementMap;
-    }, [displacementMap]);
+    // For now, use displacement map directly as normal map
+    // In production, you'd convert displacement to normal map
+    const normalMap = displacementMap;
     
     // Configure textures for seamless tiling
     [diffuseMap, roughnessMap, displacementMap, normalMap].forEach(texture => {
@@ -195,47 +230,6 @@ function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => voi
   // Store height data for vehicle sampling
   const heightData = useMemo(() => generateHeightData(worldWidth, worldDepth), []);
   
-  // Expose terrain height sampling function globally
-  useEffect(() => {
-    // Store the height sampling function on window for vehicle access
-    (window as any).getTerrainHeight = (x: number, z: number): number => {
-      // Convert world coordinates to terrain grid coordinates
-      const gridX = Math.floor(((x + terrainSize / 2) / terrainSize) * worldWidth);
-      const gridZ = Math.floor(((z + terrainSize / 2) / terrainSize) * worldDepth);
-      
-      // Clamp to terrain bounds
-      const clampedX = Math.max(0, Math.min(worldWidth - 1, gridX));
-      const clampedZ = Math.max(0, Math.min(worldDepth - 1, gridZ));
-      
-      // Get height from data array
-      const index = clampedZ * worldWidth + clampedX;
-      return heightData[index] || 0;
-    };
-    
-    // Function to calculate terrain normal at a position
-    (window as any).getTerrainNormal = (x: number, z: number): THREE.Vector3 => {
-      const delta = 1.0; // Sample distance
-      
-      // Get heights at nearby points
-      const hL = (window as any).getTerrainHeight(x - delta, z);
-      const hR = (window as any).getTerrainHeight(x + delta, z);
-      const hD = (window as any).getTerrainHeight(x, z - delta);
-      const hU = (window as any).getTerrainHeight(x, z + delta);
-      
-      // Calculate normal vector
-      const normal = new THREE.Vector3(hL - hR, 2.0 * delta, hD - hU);
-      normal.normalize();
-      
-      return normal;
-    };
-    
-    return () => {
-      // Cleanup on unmount
-      delete (window as any).getTerrainHeight;
-      delete (window as any).getTerrainNormal;
-    };
-  }, [heightData, worldWidth, worldDepth, terrainSize]);
-  
   // Generate terrain geometry
   const terrainGeometry = useMemo(() => {
     console.log('[Terrain] Creating terrain geometry');
@@ -249,12 +243,31 @@ function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => voi
       
       geometry.rotateX(-Math.PI / 2); // Make it horizontal
       
-      const vertices = geometry.attributes.position.array as Float32Array;
-      console.log('[Terrain] Vertices length:', vertices.length, 'heightData length:', heightData.length);
+      const positionAttribute = geometry.attributes.position;
+      if (!positionAttribute) {
+        console.error('[Terrain] No position attribute in geometry');
+        return geometry;
+      }
+      
+      const vertices = positionAttribute.array as Float32Array;
+      console.log('[Terrain] Vertices length:', vertices?.length || 0, 'heightData length:', heightData?.length || 0);
       
       // Apply height data to vertices
-      for (let i = 0, j = 0; i < heightData.length; i++, j += 3) {
-        vertices[j + 1] = heightData[i]; // Y coordinate
+      // Note: both are Float32Arrays, not regular arrays
+      if ((heightData instanceof Float32Array || Array.isArray(heightData)) && heightData.length > 0 && 
+          vertices && vertices.length > 0) {
+        for (let i = 0, j = 0; i < heightData.length; i++, j += 3) {
+          if (j + 1 < vertices.length) {
+            vertices[j + 1] = heightData[i]; // Y coordinate
+          }
+        }
+      } else {
+        console.error('[Terrain] heightData or vertices not valid:', {
+          heightData: !!heightData,
+          heightDataLength: heightData?.length,
+          vertices: !!vertices,
+          verticesLength: vertices?.length
+        });
       }
       
       geometry.computeVertexNormals(); // Recalculate normals for proper lighting
@@ -267,34 +280,143 @@ function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => voi
     }
   }, [heightData]);
 
+  // Create collision mesh geometry (clone of terrain but elevated)
+  const collisionGeometry = useMemo(() => {
+    if (!terrainGeometry) return null;
+    
+    // Clone the terrain geometry
+    const collisionGeo = terrainGeometry.clone();
+    
+    // Elevate all vertices by the maximum displacement amount plus buffer
+    // With displacementScale=1.5 and displacementBias=-0.75:
+    // Displacement range is [-1.5, 1.5], so max upward displacement is 1.5
+    // Add buffer for normal map visual effects and safety
+    const collisionOffset = 2.0; // 1.5 (max upward displacement) + 0.5 (buffer)
+    
+    const vertices = collisionGeo.attributes.position.array as Float32Array;
+    for (let i = 1; i < vertices.length; i += 3) {
+      vertices[i] += collisionOffset; // Elevate Y coordinate
+    }
+    
+    // Recompute normals for the collision mesh
+    collisionGeo.computeVertexNormals();
+    
+    return collisionGeo;
+  }, [terrainGeometry]);
+  
+  // Update the global terrain height function to use collision mesh height
+  useEffect(() => {
+    // Store the height sampling function with collision offset
+    (window as any).getTerrainHeight = (x: number, z: number): number => {
+      // Convert world coordinates to terrain grid coordinates (with fractional parts)
+      const gridX = ((x + terrainSize / 2) / terrainSize) * worldWidth;
+      const gridZ = ((z + terrainSize / 2) / terrainSize) * worldDepth;
+      
+      // Get integer grid coordinates
+      const x0 = Math.floor(gridX);
+      const z0 = Math.floor(gridZ);
+      const x1 = Math.min(x0 + 1, worldWidth - 1);
+      const z1 = Math.min(z0 + 1, worldDepth - 1);
+      
+      // Get fractional parts for interpolation
+      const fx = gridX - x0;
+      const fz = gridZ - z0;
+      
+      // Clamp coordinates
+      const clampX0 = Math.max(0, Math.min(worldWidth - 1, x0));
+      const clampZ0 = Math.max(0, Math.min(worldDepth - 1, z0));
+      const clampX1 = Math.max(0, Math.min(worldWidth - 1, x1));
+      const clampZ1 = Math.max(0, Math.min(worldDepth - 1, z1));
+      
+      // Get heights at four corners
+      const h00 = heightData[clampZ0 * worldWidth + clampX0] || 0;
+      const h10 = heightData[clampZ0 * worldWidth + clampX1] || 0;
+      const h01 = heightData[clampZ1 * worldWidth + clampX0] || 0;
+      const h11 = heightData[clampZ1 * worldWidth + clampX1] || 0;
+      
+      // Bilinear interpolation
+      const h0 = h00 * (1 - fx) + h10 * fx;
+      const h1 = h01 * (1 - fx) + h11 * fx;
+      const interpolatedHeight = h0 * (1 - fz) + h1 * fz;
+      
+      // Add offset for collision mesh
+      // Account for displacement that can go both up and down
+      // displacementScale=1.5, displacementBias=-0.75 means displacement range is [-1.5, 1.5]
+      // So maximum height variation is 1.5 units up from base
+      return interpolatedHeight + 2.0; // Add max displacement + buffer for safety
+    };
+    
+    // Function to calculate terrain normal at a position
+    (window as any).getTerrainNormal = (x: number, z: number): THREE.Vector3 => {
+      const delta = 1.0; // Sample distance
+      
+      // Get heights at nearby points (already includes collision offset)
+      const hL = (window as any).getTerrainHeight(x - delta, z);
+      const hR = (window as any).getTerrainHeight(x + delta, z);
+      const hD = (window as any).getTerrainHeight(x, z - delta);
+      const hU = (window as any).getTerrainHeight(x, z + delta);
+      
+      // Calculate normal vector
+      const normal = new THREE.Vector3(hL - hR, 2.0 * delta, hD - hU);
+      normal.normalize();
+      
+      return normal;
+    };
+    
+    return () => {
+      delete (window as any).getTerrainHeight;
+      delete (window as any).getTerrainNormal;
+    };
+  }, [heightData, terrainSize, worldWidth, worldDepth]);
+
   return (
-    <mesh 
-      ref={meshRef}
-      receiveShadow
-      castShadow
-      position={[0, 0, 0]}
-      onClick={onClick}
-      onError={(error) => {
-        console.error('[Terrain] Mesh rendering error:', error);
-      }}
-    >
-      <primitive object={terrainGeometry} />
-      <meshStandardMaterial 
-        map={textures.diffuseMap}
-        normalMap={textures.normalMap}
-        normalScale={new THREE.Vector2(1.5, 1.5)}
-        roughnessMap={textures.roughnessMap}
-        roughness={0.9}
-        metalness={0.05}
-        bumpMap={textures.displacementMap}
-        bumpScale={0.5}
-        displacementMap={textures.displacementMap}
-        displacementScale={2}
-        side={THREE.DoubleSide}
-        // Lunar surface color tint - slightly gray
-        color={new THREE.Color(0.8, 0.8, 0.82)}
-      />
-    </mesh>
+    <group>
+      {/* Visual terrain mesh with textures and displacement */}
+      <mesh 
+        ref={meshRef}
+        receiveShadow
+        castShadow
+        position={[0, 0, 0]}
+        onClick={onClick}
+        onError={(error) => {
+          console.error('[Terrain] Mesh rendering error:', error);
+        }}
+      >
+        <primitive object={terrainGeometry} />
+        <meshStandardMaterial 
+          map={textures.diffuseMap}
+          normalMap={textures.normalMap}
+          normalScale={new THREE.Vector2(1.5, 1.5)}
+          roughnessMap={textures.roughnessMap}
+          roughness={0.9}
+          metalness={0.05}
+          bumpMap={textures.displacementMap}
+          bumpScale={0.3} // Reduced to minimize visual-only height variations
+          displacementMap={textures.displacementMap}
+          displacementScale={1.5} // Reduced to minimize clipping issues
+          displacementBias={-0.75} // Center the displacement (range: -1.5 to 1.5)
+          side={THREE.DoubleSide}
+          // Lunar surface color tint - slightly gray
+          color={new THREE.Color(0.8, 0.8, 0.82)}
+        />
+      </mesh>
+      
+      {/* Invisible collision mesh - elevated above visual terrain */}
+      {collisionGeometry && (
+        <mesh 
+          position={[0, 0, 0]}
+          visible={showCollisionMesh} // Can be toggled for debugging
+        >
+          <primitive object={collisionGeometry} />
+          <meshBasicMaterial 
+            color="#00ff00"
+            wireframe={true}
+            transparent
+            opacity={showCollisionMesh ? 0.3 : 0}
+          />
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -508,7 +630,7 @@ const Vehicle = React.memo(({
   const [isFlashing, setIsFlashing] = useState(false);
   const [showBoundingBox] = useState(false); // Debug: show bounding box
   const [forceUseBox] = useState(false); // Debug: force use box instead of model
-  const [manualOffset, setManualOffset] = useState(0); // Debug: manual offset adjustment
+  const [manualOffset, setManualOffset] = useState(0.5); // Debug: manual offset adjustment - increased to prevent clipping
   
   // Debug: Keyboard controls for offset adjustment
   useEffect(() => {
@@ -533,15 +655,6 @@ const Vehicle = React.memo(({
       return () => window.removeEventListener('keydown', handleKeyPress);
     }
   }, [isSelected, vehicle.id]);
-  
-  // Debug log vehicle data
-  console.log(`[Vehicle ${vehicle.id}] Rendering at:`, { 
-    serverPos: { x: vehicle.x, y: vehicle.y, z: vehicle.z }, 
-    optimisticPos: optimisticPosition,
-    calculatedPos: { x: vehiclePosition.x, y: vehiclePosition.y, z: vehiclePosition.z },
-    isOwnedByPlayer,
-    type: vehicle.type 
-  });
   
   // Load GLB model from public directory
   // Note: useGLTF is a hook and must not be called conditionally
@@ -611,12 +724,23 @@ const Vehicle = React.memo(({
     // Get terrain height at vehicle position
     const getHeight = (window as any).getTerrainHeight;
     if (getHeight) {
-      const terrainHeight = getHeight(basePos.x, basePos.z);
-      basePos.y = terrainHeight + vehicleHeightOffset; // Use calculated offset
+      const collisionHeight = getHeight(basePos.x, basePos.z);
+      // Subtract collision offset to get visual terrain height
+      const visualTerrainHeight = collisionHeight - 2.0;
+      basePos.y = visualTerrainHeight + vehicleHeightOffset; // Position on visual terrain
     }
     
     return basePos;
   }, [vehicle.x, vehicle.y, vehicle.z, optimisticPosition, vehicleHeightOffset]);
+  
+  // Debug log vehicle data (after vehiclePosition is defined)
+  console.log(`[Vehicle ${vehicle.id}] Rendering at:`, { 
+    serverPos: { x: vehicle.x, y: vehicle.y, z: vehicle.z }, 
+    optimisticPos: optimisticPosition,
+    calculatedPos: { x: vehiclePosition.x, y: vehiclePosition.y, z: vehiclePosition.z },
+    isOwnedByPlayer,
+    type: vehicle.type 
+  });
   
   // Memoize vehicle color calculation
   const vehicleColor = useMemo(() => {
@@ -646,11 +770,13 @@ const Vehicle = React.memo(({
   useEffect(() => {
     const getHeight = (window as any).getTerrainHeight;
     if (getHeight) {
-      const terrainHeight = getHeight(vehiclePosition.x, vehiclePosition.z);
-      currentPos.current.set(vehiclePosition.x, terrainHeight + vehicleHeightOffset, vehiclePosition.z);
+      const collisionHeight = getHeight(vehiclePosition.x, vehiclePosition.z);
+      // Subtract 10 to get visual terrain height
+      const visualTerrainHeight = collisionHeight - 2.0;
+      currentPos.current.set(vehiclePosition.x, visualTerrainHeight + vehicleHeightOffset, vehiclePosition.z);
       console.log(`[Vehicle ${vehicle.id}] Initial position set:`, {
         x: vehiclePosition.x,
-        y: terrainHeight + vehicleHeightOffset,
+        y: visualTerrainHeight + vehicleHeightOffset,
         z: vehiclePosition.z,
         vehicleHeightOffset
       });
@@ -729,7 +855,8 @@ const Vehicle = React.memo(({
         // Update terrain height at new position
         const getHeight = (window as any).getTerrainHeight;
         if (getHeight) {
-          currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + vehicleHeightOffset;
+          const collisionHeight = getHeight(currentPos.current.x, currentPos.current.z);
+          currentPos.current.y = (collisionHeight - 2.5) + vehicleHeightOffset; // Subtract collision offset for visual terrain
         }
       }
     } else if (isMoving.current) {
@@ -802,7 +929,8 @@ const Vehicle = React.memo(({
           // Update terrain height at new position
           const getHeight = (window as any).getTerrainHeight;
           if (getHeight) {
-            currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + vehicleHeightOffset;
+            const collisionHeight = getHeight(currentPos.current.x, currentPos.current.z);
+            currentPos.current.y = (collisionHeight - 2.5) + vehicleHeightOffset; // Subtract collision offset for visual terrain
           }
         } else {
           // Reached destination
@@ -1075,8 +1203,8 @@ const Vehicle = React.memo(({
           {/* Add subtle glow effect */}
           <pointLight 
             color="#00ff00"
-            intensity={2}
-            distance={10}
+            intensity={0.5} // Reduced to prevent light pollution
+            distance={5} // Reduced range
             decay={2}
           />
           {/* Add smaller outer glow mesh */}
@@ -1099,23 +1227,25 @@ const Vehicle = React.memo(({
   );
 });
 
-// PBR Environment Lighting Component
+// PBR Environment Lighting Component - Optimized for lunar surface
 function PBRLighting() {
   return (
     <>
-      {/* HDR Environment Map for realistic lighting and reflections */}
+      {/* HDR Environment Map for reflections and subtle ambient lighting */}
       <Environment
         files="/lighting/qwantani_dusk_2_4k.exr"
         background={false} // Don't use as background, keep space black
         blur={0.02}
         resolution={256} // Lower resolution for performance
+        intensity={0.3} // Reduced intensity to act as ambient fill only
       />
       
       {/* Main sun light - strong directional light for lunar surface */}
+      {/* Single strong light source like the sun on the moon */}
       <directionalLight
         position={[50, 100, 30]}
-        intensity={2}
-        color="#ffffff"
+        intensity={1.5} // Reduced from 2 to avoid overexposure with HDRI
+        color="#ffdd66" // Warm yellow sunlight
         castShadow
         shadow-mapSize={[4096, 4096]}
         shadow-camera-near={0.1}
@@ -1127,15 +1257,16 @@ function PBRLighting() {
         shadow-bias={-0.0005}
       />
       
-      {/* Subtle fill light from opposite direction */}
+      {/* Very subtle fill light to soften harsh shadows */}
       <directionalLight
         position={[-30, 50, -20]}
-        intensity={0.3}
+        intensity={0.15} // Much lower to avoid double shadows
         color="#8899ff"
+        castShadow={false} // No shadows from fill light
       />
       
-      {/* Ambient light for shadowed areas */}
-      <ambientLight intensity={0.1} color="#ffffff" />
+      {/* Minimal ambient for complete darkness prevention */}
+      <ambientLight intensity={0.05} color="#404060" /> {/* Lower and slightly blue for space feel */}
     </>
   );
 }
@@ -1345,7 +1476,7 @@ function IsometricCameraController() {
 }
 
 // Interactive Ground Plane for Movement
-const InteractiveGround = React.memo(() => {
+const InteractiveGround = React.memo(({ showCollisionMesh }: { showCollisionMesh: boolean }) => {
   const isConnected = useGameConnection();
   const myPlayerId = useMyPlayerId();
   const selectedVehicleId = useSelectedVehicleId();
@@ -1384,7 +1515,7 @@ const InteractiveGround = React.memo(() => {
   return (
     <>
       {/* Terrain */}
-      <Terrain onClick={handleClick} />
+      <Terrain onClick={handleClick} showCollisionMesh={showCollisionMesh} />
       
       {/* Invisible click plane for movement (above terrain) */}
       <mesh 
@@ -1479,7 +1610,7 @@ function ServerOres() {
   
   return (
     <>
-      {localOres.map(ore => (
+      {localOres && Array.isArray(localOres) && localOres.map(ore => (
         <Ore 
           key={ore.id}
           id={ore.id}
@@ -1507,6 +1638,22 @@ const Scene3D = React.memo(() => {
   const gameState = useGameState() as AppGameState | null;
   const myPlayerId = useMyPlayerId();
   const selectedVehicleId = useSelectedVehicleId();
+  
+  // Debug state for collision mesh visibility
+  const [showCollisionMesh, setShowCollisionMesh] = useState(false);
+  
+  // Debug keyboard controls
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'c' || e.key === 'C') {
+        setShowCollisionMesh(prev => !prev);
+        console.log('[Scene3D] Collision mesh visibility toggled');
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
 
   console.log(`[SCENE3D-${currentRender}] Props:`, {
     isConnected,
@@ -1519,55 +1666,65 @@ const Scene3D = React.memo(() => {
 
   // Memoize players and vehicles to prevent re-renders
   const players = useMemo(() => {
-    if (!gameState?.players) {
-      console.log(`[SCENE3D-${currentRender}] No players in gameState`);
+    try {
+      if (!gameState?.players) {
+        console.log(`[SCENE3D] No players in gameState`);
+        return [];
+      }
+      
+      // Handle MapSchema properly
+      const playerArray: Array<[string, any]> = [];
+      if (gameState.players.forEach) {
+        // It's a MapSchema
+        gameState.players.forEach((player: any, playerId: string) => {
+          playerArray.push([playerId, player]);
+        });
+      } else {
+        // Fallback to Object.entries
+        Object.entries(gameState.players).forEach(([playerId, player]) => {
+          playerArray.push([playerId, player]);
+        });
+      }
+      
+      console.log(`[SCENE3D] Total players found: ${playerArray.length}`);
+      return playerArray;
+    } catch (error) {
+      console.error('[SCENE3D] Error processing players:', error);
       return [];
     }
-    
-    // Handle MapSchema properly
-    const playerArray = [];
-    if (gameState.players.forEach) {
-      // It's a MapSchema
-      gameState.players.forEach((player, playerId) => {
-        playerArray.push([playerId, player]);
-      });
-    } else {
-      // Fallback to Object.entries
-      Object.entries(gameState.players).forEach(([playerId, player]) => {
-        playerArray.push([playerId, player]);
-      });
-    }
-    
-    console.log(`[SCENE3D-${currentRender}] Total players found: ${playerArray.length}`);
-    return playerArray;
   }, [gameState?.players]);
   
   const vehicles = useMemo(() => {
-    if (!gameState?.vehicles) {
-      console.log(`[SCENE3D-${currentRender}] No vehicles in gameState`);
+    try {
+      if (!gameState?.vehicles) {
+        console.log(`[SCENE3D] No vehicles in gameState`);
+        return [];
+      }
+      
+      console.log(`[SCENE3D] Processing vehicles, type:`, typeof gameState.vehicles);
+      
+      // Handle MapSchema properly
+      const vehicleArray: Array<[string, any]> = [];
+      if (gameState.vehicles.forEach) {
+        // It's a MapSchema
+        gameState.vehicles.forEach((vehicle: any, vehicleId: string) => {
+          console.log(`[SCENE3D] Vehicle ${vehicleId}:`, vehicle);
+          vehicleArray.push([vehicleId, vehicle]);
+        });
+      } else {
+        // Fallback to Object.entries
+        Object.entries(gameState.vehicles).forEach(([vehicleId, vehicle]) => {
+          console.log(`[SCENE3D] Vehicle ${vehicleId}:`, vehicle);
+          vehicleArray.push([vehicleId, vehicle]);
+        });
+      }
+      
+      console.log(`[SCENE3D] Total vehicles found: ${vehicleArray.length}`);
+      return vehicleArray;
+    } catch (error) {
+      console.error('[SCENE3D] Error processing vehicles:', error);
       return [];
     }
-    
-    console.log(`[SCENE3D-${currentRender}] Processing vehicles, type:`, typeof gameState.vehicles);
-    
-    // Handle MapSchema properly
-    const vehicleArray = [];
-    if (gameState.vehicles.forEach) {
-      // It's a MapSchema
-      gameState.vehicles.forEach((vehicle, vehicleId) => {
-        console.log(`[SCENE3D-${currentRender}] Vehicle ${vehicleId}:`, vehicle);
-        vehicleArray.push([vehicleId, vehicle]);
-      });
-    } else {
-      // Fallback to Object.entries
-      Object.entries(gameState.vehicles).forEach(([vehicleId, vehicle]) => {
-        console.log(`[SCENE3D-${currentRender}] Vehicle ${vehicleId}:`, vehicle);
-        vehicleArray.push([vehicleId, vehicle]);
-      });
-    }
-    
-    console.log(`[SCENE3D-${currentRender}] Total vehicles found: ${vehicleArray.length}`);
-    return vehicleArray;
   }, [gameState?.vehicles]);
   
   // Track when component effects run
@@ -1578,17 +1735,25 @@ const Scene3D = React.memo(() => {
     };
   }, []);
   
-  console.log(`[SCENE3D-${currentRender}] Rendering Canvas with ${players.length} players, ${vehicles.length} vehicles`);
+  console.log(`[SCENE3D-${currentRender}] Rendering Canvas with ${Array.isArray(players) ? players.length : 0} players, ${Array.isArray(vehicles) ? vehicles.length : 0} vehicles`);
 
-  return (
-    <div style={{ width: '100%', height: '100%' }}>
-      <Canvas
+  // Ensure arrays are initialized
+  const safePlayers = players || [];
+  const safeVehicles = vehicles || [];
+
+  // Add error boundary for Canvas
+  try {
+    return (
+      <div style={{ width: '100%', height: '100%' }}>
+        <Canvas
         shadows
         camera={{ 
-          position: [10, 10, 10], 
+          position: [10, 10, 10] as [number, number, number], 
           fov: 50
         }}
         style={{ background: 'linear-gradient(to bottom, #000000 0%, #0a0a0a 100%)' }}
+        gl={{ preserveDrawingBuffer: true }}
+        dpr={[1, 2]}
         onCreated={(state) => {
           console.log('[Scene3D] Canvas created - renderer:', state.gl);
         }}
@@ -1600,46 +1765,50 @@ const Scene3D = React.memo(() => {
         <PBRLighting />
         
         {/* Add fog for lunar atmosphere effect */}
-        <fog attach="fog" args={['#000000', 50, 300]} />
+        <fog attach="fog" args={['#000000', 50, 300] as [string, number, number]} />
         
         {/* Starfield background */}
-        <Stars 
-          radius={300} 
-          depth={50} 
-          count={5000} 
-          factor={4} 
-          saturation={0} 
-          fade 
-          speed={0.5}
-        />
+        {typeof Stars !== 'undefined' && (
+          <Stars 
+            radius={300} 
+            depth={50} 
+            count={5000} 
+            factor={4} 
+            saturation={0} 
+            fade 
+            speed={0.5}
+          />
+        )}
         
         {/* Isometric Camera Controller */}
         <IsometricCameraController />
         
         {/* Grid */}
-        <Grid 
-          args={[100, 100]} 
-          position={[0, 0, 0]}
-          cellSize={1}
-          cellThickness={0.5}
-          cellColor="#404040"
-          sectionSize={10}
-          sectionThickness={1}
-          sectionColor="#606060"
-          fadeDistance={50}
-          fadeStrength={1}
-          followCamera={false}
-          infiniteGrid={true}
-        />
+        {typeof Grid !== 'undefined' && (
+          <Grid 
+            args={[100, 100] as [number, number]} 
+            position={[0, 0, 0] as [number, number, number]}
+            cellSize={1}
+            cellThickness={0.5}
+            cellColor="#404040"
+            sectionSize={10}
+            sectionThickness={1}
+            sectionColor="#606060"
+            fadeDistance={50}
+            fadeStrength={1}
+            followCamera={false}
+            infiniteGrid={true}
+          />
+        )}
 
         {/* Interactive Ground */}
-        <InteractiveGround />
+        <InteractiveGround showCollisionMesh={showCollisionMesh} />
         
         {/* Server Synced Ores */}
         <ServerOres />
         
         {/* Render All Players */}
-        {players.map(([playerId, playerData]) => {
+        {safePlayers && Array.isArray(safePlayers) && safePlayers.map(([playerId, playerData]) => {
           const player = playerData as Player;
           return (
             <PlayerAvatar
@@ -1651,7 +1820,7 @@ const Scene3D = React.memo(() => {
         })}
         
         {/* Render All Vehicles */}
-        {vehicles.map(([vehicleId, vehicleData]) => {
+        {safeVehicles && Array.isArray(safeVehicles) && safeVehicles.map(([vehicleId, vehicleData]) => {
           const vehicle = vehicleData as Vehicle;
           const isMyVehicle = vehicle.ownerId === myPlayerId;
           return (
@@ -1665,7 +1834,7 @@ const Scene3D = React.memo(() => {
         })}
         
         {/* Debug: Show test vehicle when connected but no vehicles */}
-        {isConnected && vehicles.length === 0 && (
+        {isConnected && Array.isArray(safeVehicles) && safeVehicles.length === 0 && (
           <group position={[0, 1, 0]}>
             <mesh castShadow receiveShadow>
               <boxGeometry args={[4, 2, 5]} />
@@ -1725,8 +1894,39 @@ const Scene3D = React.memo(() => {
           </>
         )}
       </Canvas>
+      
+      {/* Debug Overlay */}
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        fontSize: '12px',
+        fontFamily: 'monospace',
+        pointerEvents: 'none'
+      }}>
+        <div>Debug Controls:</div>
+        <div>Press 'C' - Toggle Collision Mesh {showCollisionMesh ? '(ON)' : '(OFF)'}</div>
+        <div>Collision Offset: 2.0 units</div>
+        <div>Displacement Scale: 1.5</div>
+        <div>Manual Offset: 0.5</div>
+      </div>
     </div>
   );
+  } catch (error) {
+    console.error('[SCENE3D] Error rendering Canvas:', error);
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+        <div>
+          <h2>Error loading 3D scene</h2>
+          <p>{error?.message || 'Unknown error'}</p>
+        </div>
+      </div>
+    );
+  }
 });
 
 // Log when Scene3D is exported

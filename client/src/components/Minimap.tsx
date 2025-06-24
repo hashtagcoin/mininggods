@@ -16,9 +16,9 @@ import { CanvasErrorBoundary } from './ErrorBoundary';
 
 // Type for the actual game state structure used in the app
 interface AppGameState {
-  players: Record<string, Player>;
-  vehicles: Record<string, Vehicle>;
-  oreNodes: Record<string, any>;
+  players: Record<string, Player> | any; // Can be MapSchema or plain object
+  vehicles: Record<string, Vehicle> | any; // Can be MapSchema or plain object
+  oreNodes: Record<string, any> | any;
   worldSeed?: number;
   tick: number;
 }
@@ -85,13 +85,25 @@ const MinimapVehicle = React.memo(({
 
   // Convert world position to minimap coordinates
   const minimapPosition = useMemo(() => {
-    const normalizedX = (vehiclePosition.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX);
-    const normalizedZ = (vehiclePosition.z - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ);
+    // Ensure bounds are valid
+    const xRange = worldBounds.maxX - worldBounds.minX;
+    const zRange = worldBounds.maxZ - worldBounds.minZ;
+    
+    if (xRange === 0 || zRange === 0) {
+      console.warn('[Minimap] Invalid world bounds, using default position');
+      return [0, 0.2, 0] as [number, number, number];
+    }
+    
+    const normalizedX = (vehiclePosition.x - worldBounds.minX) / xRange;
+    const normalizedZ = (vehiclePosition.z - worldBounds.minZ) / zRange;
     
     const mapX = (normalizedX - 0.5) * 9;
     const mapZ = (normalizedZ - 0.5) * 9;
     
-    console.log(`[Minimap Vehicle ${vehicle.id}] World pos: (${vehiclePosition.x}, ${vehiclePosition.z}) -> Minimap pos: (${mapX}, ${mapZ})`);
+    // Debug log occasionally to avoid spam
+    if (Math.random() < 0.01) {
+      console.log(`[Minimap Vehicle ${vehicle.id}] World pos: (${vehiclePosition.x}, ${vehiclePosition.z}) -> Minimap pos: (${mapX}, ${mapZ})`);
+    }
     
     return [mapX, 0.2, mapZ] as [number, number, number];
   }, [vehiclePosition, worldBounds, vehicle.id]);
@@ -205,8 +217,11 @@ const MinimapPlayer = React.memo(({
 }) => {
   // Convert world position to minimap coordinates
   const minimapPosition = useMemo(() => {
-    const normalizedX = (player.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX);
-    const normalizedZ = (0 - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ); // Players are at z=0
+    const playerX = player.x || 0;
+    const playerZ = 0; // Players are always at ground level (z=0)
+    
+    const normalizedX = (playerX - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX);
+    const normalizedZ = (playerZ - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ);
     
     return [
       (normalizedX - 0.5) * 9,
@@ -249,9 +264,13 @@ function MinimapGround({
 }) {
   const handleClick = useCallback((event: any) => {
     event.stopPropagation();
+    if (!event.point) return;
+    
     // Convert minimap coordinates back to world coordinates
     const worldX = ((event.point.x / 4.5 + 1) / 2) * (worldBounds.maxX - worldBounds.minX) + worldBounds.minX;
     const worldZ = ((event.point.z / 4.5 + 1) / 2) * (worldBounds.maxZ - worldBounds.minZ) + worldBounds.minZ;
+    
+    console.log(`[Minimap] Ground click at minimap (${event.point.x.toFixed(2)}, ${event.point.z.toFixed(2)}) -> world (${worldX.toFixed(2)}, ${worldZ.toFixed(2)})`);
     onGroundClick(worldX, worldZ);
   }, [worldBounds, onGroundClick]);
 
@@ -296,9 +315,21 @@ const MinimapScene = React.memo(() => {
     
     // Safe iteration over players
     if (gameState.players) {
-      Object.values(gameState.players).forEach((player: Player) => {
-        positions.push({ x: player.x, z: 0 });
-      });
+      if (gameState.players.forEach) {
+        // Handle MapSchema
+        gameState.players.forEach((player: Player) => {
+          positions.push({ x: player.x || 0, z: 0 }); // Players are at ground level
+        });
+      } else if (typeof gameState.players === 'object') {
+        // Fallback to Object.values
+        try {
+          Object.values(gameState.players).forEach((player: Player) => {
+            positions.push({ x: player.x || 0, z: 0 }); // Players are at ground level
+          });
+        } catch (e) {
+          console.error('[Minimap] Error iterating players:', e);
+        }
+      }
     }
     
     // Safe iteration over vehicles
@@ -317,15 +348,36 @@ const MinimapScene = React.memo(() => {
     }
 
     // Ensure we have at least some positions for bounds calculation
-    if (positions.length === 0) {
+    if (!positions || !Array.isArray(positions) || positions.length === 0) {
       positions.push({ x: 0, z: 0 });
     }
 
     // Calculate bounds with dynamic padding based on entity spread
-    const minX = Math.min(...positions.map(p => p.x));
-    const maxX = Math.max(...positions.map(p => p.x));
-    const minZ = Math.min(...positions.map(p => p.z));
-    const maxZ = Math.max(...positions.map(p => p.z));
+    // Ensure positions is a valid array
+    if (!Array.isArray(positions)) {
+      console.error('[Minimap] positions is not an array:', typeof positions);
+      return { worldBounds: { minX: -50, maxX: 50, minZ: -50, maxZ: 50 } };
+    }
+    
+    const xValues = positions.map(p => p.x);
+    const zValues = positions.map(p => p.z);
+    
+    // Safe min/max operations with try-catch
+    let minX = -50, maxX = 50, minZ = -50, maxZ = 50;
+    
+    try {
+      if (Array.isArray(xValues) && xValues.length > 0) {
+        minX = Math.min(...xValues);
+        maxX = Math.max(...xValues);
+      }
+      if (Array.isArray(zValues) && zValues.length > 0) {
+        minZ = Math.min(...zValues);
+        maxZ = Math.max(...zValues);
+      }
+    } catch (e) {
+      console.error('[Minimap] Error calculating bounds:', e);
+      // Use default values set above
+    }
     
     // Add 20% padding or minimum 20 units
     const xRange = maxX - minX;
@@ -364,14 +416,35 @@ const MinimapScene = React.memo(() => {
       />
 
       {/* Render players */}
-      {gameState.players && Object.entries(gameState.players).map(([playerId, player]) => (
-        <MinimapPlayer
-          key={playerId}
-          player={player}
-          isMe={playerId === myPlayerId}
-          worldBounds={worldBounds}
-        />
-      ))}
+      {gameState.players && (() => {
+        const playerEntries = [];
+        if (gameState.players.forEach) {
+          // Handle MapSchema
+          gameState.players.forEach((player: Player, playerId: string) => {
+            playerEntries.push(
+              <MinimapPlayer
+                key={playerId}
+                player={player}
+                isMe={playerId === myPlayerId}
+                worldBounds={worldBounds}
+              />
+            );
+          });
+        } else if (typeof gameState.players === 'object') {
+          // Handle regular object
+          Object.entries(gameState.players).forEach(([playerId, player]) => {
+            playerEntries.push(
+              <MinimapPlayer
+                key={playerId}
+                player={player as Player}
+                isMe={playerId === myPlayerId}
+                worldBounds={worldBounds}
+              />
+            );
+          });
+        }
+        return playerEntries;
+      })()}
 
       {/* Render vehicles */}
       {gameState.vehicles && (() => {
@@ -422,6 +495,13 @@ const Minimap: React.FC<MinimapProps> = ({ isVisible = true, onClose }) => {
   
   const selectedVehicle = useMemo(() => {
     if (!selectedVehicleId || !gameState?.vehicles) return null;
+    
+    // Handle MapSchema
+    if (gameState.vehicles.get) {
+      return gameState.vehicles.get(selectedVehicleId) || null;
+    }
+    
+    // Handle regular object
     return gameState.vehicles[selectedVehicleId] || null;
   }, [selectedVehicleId, gameState?.vehicles]);
 

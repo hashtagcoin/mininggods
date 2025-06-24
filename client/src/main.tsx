@@ -9,6 +9,9 @@ import '@fontsource/roboto/400.css'
 import '@fontsource/roboto/500.css'
 import '@fontsource/roboto/700.css'
 
+// Import global error handler to catch undefined.length errors
+import './utils/globalErrorHandler'
+
 console.log('[MAIN] Starting application at', new Date().toISOString());
 console.log('[MAIN] Creating root and rendering App');
 

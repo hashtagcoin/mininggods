@@ -373,12 +373,12 @@ function GaragePanel() {
 
   const handleMaintenance = (vehicleId: string, actionId: string) => {
     console.log(`Starting ${actionId} for vehicle ${vehicleId}`);
-    setMaintenanceInProgress(prev => ({ ...prev, [`${vehicleId}_${actionId}`]: true }));
+    setMaintenanceInProgress(prev => ({ ...(prev || {}), [`${vehicleId}_${actionId}`]: true }));
     
     // Simulate maintenance duration
     const action = maintenanceActions.find(a => a.id === actionId);
     setTimeout(() => {
-      setMaintenanceInProgress(prev => ({ ...prev, [`${vehicleId}_${actionId}`]: false }));
+      setMaintenanceInProgress(prev => ({ ...(prev || {}), [`${vehicleId}_${actionId}`]: false }));
       console.log(`Completed ${actionId} for vehicle ${vehicleId}`);
     }, (action?.duration || 30) * 1000);
   };
@@ -455,7 +455,7 @@ function GaragePanel() {
           <Card sx={{ bgcolor: 'rgba(255, 107, 53, 0.1)', border: '1px solid rgba(255, 107, 53, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#ff6b35', fontWeight: 600 }}>
-                {garageVehicles.filter(v => v.issues.length > 0).length}
+                {garageVehicles.filter(v => v.issues && v.issues.length > 0).length}
               </Typography>
               <Typography variant="body2" sx={{ color: '#ffffff' }}>
                 Need Attention
@@ -485,7 +485,7 @@ function GaragePanel() {
             <Card
               sx={{
                 background: 'linear-gradient(135deg, rgba(15, 15, 35, 0.95) 0%, rgba(26, 26, 46, 0.95) 100%)',
-                border: vehicle.issues.length > 0 
+                border: vehicle.issues && vehicle.issues.length > 0 
                   ? '1px solid rgba(255, 193, 7, 0.5)' 
                   : '1px solid rgba(255, 107, 53, 0.2)',
                 borderRadius: 2
@@ -525,7 +525,7 @@ function GaragePanel() {
                     </Box>
 
                     {/* Issues Alert */}
-                    {vehicle.issues.length > 0 && (
+                    {vehicle.issues && vehicle.issues.length > 0 && (
                       <Alert
                         severity="warning"
                         sx={{
