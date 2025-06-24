@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Box,
   Card,
   CardContent,
-  CardMedia,
   Typography,
   Chip,
   IconButton,
@@ -11,7 +10,6 @@ import {
   Button,
   LinearProgress,
   Tooltip,
-  Badge,
   Avatar,
   Divider,
   Stack
@@ -26,7 +24,6 @@ import {
   Settings as SettingsIcon,
   Launch as DeployIcon,
   Launch as RecallIcon,
-  Info as InfoIcon
 } from '@mui/icons-material';
 import { useGameStore } from '../store/gameStore';
 
@@ -108,7 +105,7 @@ interface VehicleCardProps {
 }
 
 const VehicleCard: React.FC<VehicleCardProps> = ({ vehicle, onDeploy, onRecall, onUpgrade }) => {
-  const { gameState, myPlayerId, selectedVehicleId, selectVehicle } = useGameStore();
+  const { myPlayerId, selectedVehicleId, selectVehicle } = useGameStore();
   
   const isSelected = selectedVehicleId === vehicle.id;
   const isMyVehicle = vehicle.ownerId === myPlayerId;
@@ -331,8 +328,7 @@ const VehicleCard: React.FC<VehicleCardProps> = ({ vehicle, onDeploy, onRecall, 
 }
 
 function FleetMenu() {
-  const { gameState, isConnected, selectedVehicleId, selectVehicle } = useGameStore();
-  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
+  const { isConnected } = useGameStore();
 
   const handleDeploy = (vehicleId: string) => {
     console.log(`Deploying vehicle: ${vehicleId}`);
@@ -368,7 +364,7 @@ function FleetMenu() {
 
         {/* Fleet Stats */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid xs={3}>
+          <Grid size={3}>
             <Card sx={{ bgcolor: 'rgba(255, 107, 53, 0.1)', border: '1px solid rgba(255, 107, 53, 0.3)' }}>
               <CardContent sx={{ textAlign: 'center', py: 2 }}>
                 <Typography variant="h5" sx={{ color: '#ff6b35', fontWeight: 600 }}>
@@ -381,7 +377,7 @@ function FleetMenu() {
             </Card>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Card sx={{ bgcolor: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)' }}>
               <CardContent sx={{ textAlign: 'center', py: 2 }}>
                 <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 600 }}>
@@ -394,7 +390,7 @@ function FleetMenu() {
             </Card>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Card sx={{ bgcolor: 'rgba(255, 193, 7, 0.1)', border: '1px solid rgba(255, 193, 7, 0.3)' }}>
               <CardContent sx={{ textAlign: 'center', py: 2 }}>
                 <Typography variant="h5" sx={{ color: '#ffc107', fontWeight: 600 }}>
@@ -407,7 +403,7 @@ function FleetMenu() {
             </Card>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Card sx={{ bgcolor: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.3)' }}>
               <CardContent sx={{ textAlign: 'center', py: 2 }}>
                 <Typography variant="h5" sx={{ color: '#2196f3', fontWeight: 600 }}>
@@ -425,7 +421,7 @@ function FleetMenu() {
       {/* Vehicle Grid */}
       <Grid container spacing={3}>
         {mockVehicles.map((vehicle) => (
-          <Grid item xs={12} sm={6} md={4} key={vehicle.id}>
+          <Grid size={{ xs: 12, sm: 6, md: 4 }} key={vehicle.id}>
             <VehicleCard
               vehicle={vehicle}
               onDeploy={handleDeploy}
@@ -438,7 +434,7 @@ function FleetMenu() {
 
       {/* Add New Vehicle Card */}
       <Grid container spacing={3} sx={{ mt: 2 }}>
-        <Grid item xs={12} sm={6} md={4}>
+        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
           <Card
             sx={{
               background: 'linear-gradient(135deg, rgba(15, 15, 35, 0.5) 0%, rgba(26, 26, 46, 0.5) 100%)',

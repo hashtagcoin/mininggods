@@ -287,7 +287,7 @@ function VehicleUpgradeDialog({ open, onClose, vehicleId }: VehicleUpgradeDialog
           <TabPanel key={index} value={selectedTab} index={index}>
             <Grid container spacing={2}>
               {category.upgrades.map((upgrade) => (
-                <Grid item xs={12} key={upgrade.id}>
+                <Grid size={12} key={upgrade.id}>
                   <Card
                     sx={{
                       bgcolor: 'rgba(26, 26, 46, 0.8)',
@@ -425,7 +425,7 @@ function GaragePanel() {
 
       {/* Quick Stats */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid xs={3}>
+        <Grid size={3}>
           <Card sx={{ bgcolor: 'rgba(76, 175, 80, 0.1)', border: '1px solid rgba(76, 175, 80, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#4caf50', fontWeight: 600 }}>
@@ -438,7 +438,7 @@ function GaragePanel() {
           </Card>
         </Grid>
         
-        <Grid xs={3}>
+        <Grid size={3}>
           <Card sx={{ bgcolor: 'rgba(255, 193, 7, 0.1)', border: '1px solid rgba(255, 193, 7, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#ffc107', fontWeight: 600 }}>
@@ -451,7 +451,7 @@ function GaragePanel() {
           </Card>
         </Grid>
 
-        <Grid xs={3}>
+        <Grid size={3}>
           <Card sx={{ bgcolor: 'rgba(255, 107, 53, 0.1)', border: '1px solid rgba(255, 107, 53, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#ff6b35', fontWeight: 600 }}>
@@ -464,7 +464,7 @@ function GaragePanel() {
           </Card>
         </Grid>
 
-        <Grid xs={3}>
+        <Grid size={3}>
           <Card sx={{ bgcolor: 'rgba(33, 150, 243, 0.1)', border: '1px solid rgba(33, 150, 243, 0.3)' }}>
             <CardContent sx={{ textAlign: 'center', py: 2 }}>
               <Typography variant="h5" sx={{ color: '#2196f3', fontWeight: 600 }}>
@@ -481,7 +481,7 @@ function GaragePanel() {
       {/* Vehicle List */}
       <Grid container spacing={3}>
         {garageVehicles.map((vehicle) => (
-          <Grid item xs={12} key={vehicle.id}>
+          <Grid size={12} key={vehicle.id}>
             <Card
               sx={{
                 background: 'linear-gradient(135deg, rgba(15, 15, 35, 0.95) 0%, rgba(26, 26, 46, 0.95) 100%)',
@@ -494,7 +494,7 @@ function GaragePanel() {
               <CardContent>
                 <Grid container spacing={3}>
                   {/* Vehicle Info */}
-                  <Grid item xs={12} md={4}>
+                  <Grid size={{ xs: 12, md: 4 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
                       <Avatar
                         sx={{
@@ -547,7 +547,7 @@ function GaragePanel() {
                   </Grid>
 
                   {/* Vehicle Stats */}
-                  <Grid item xs={12} md={4}>
+                  <Grid size={{ xs: 12, md: 4 }}>
                     <Typography variant="subtitle2" sx={{ color: '#ffffff', mb: 2 }}>
                       Current Status
                     </Typography>
@@ -610,7 +610,7 @@ function GaragePanel() {
                   </Grid>
 
                   {/* Actions */}
-                  <Grid item xs={12} md={4}>
+                  <Grid size={{ xs: 12, md: 4 }}>
                     <Typography variant="subtitle2" sx={{ color: '#ffffff', mb: 2 }}>
                       Actions
                     </Typography>

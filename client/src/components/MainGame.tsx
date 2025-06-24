@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Dialog,
@@ -8,8 +8,6 @@ import {
   Typography,
   IconButton,
   Slide,
-  useTheme,
-  Drawer
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -22,7 +20,9 @@ import HUD from './HUD';
 import FleetMenu from './FleetMenu';
 import GaragePanel from './GaragePanel';
 import Minimap from './Minimap';
+import ErrorBoundary from './ErrorBoundary';
 import { useGameStore } from '../store/gameStore';
+import { loopDetector } from '../utils/infiniteLoopDetector';
 
 // Full screen slide transition for panels
 const Transition = React.forwardRef(function Transition(
@@ -116,21 +116,61 @@ function PanelDialog({ open, onClose, title, children }: PanelDialogProps) {
   );
 }
 
+// Initialization happens outside component to avoid re-renders
+let initialized = false;
+let initCount = 0;
+const initializeGameOnce = () => {
+  console.log(`[INIT-${++initCount}] initializeGameOnce called, initialized=${initialized}`);
+  if (initialized) {
+    console.log(`[INIT-${initCount}] Already initialized, returning`);
+    return;
+  }
+  initialized = true;
+  
+  console.log(`[INIT-${initCount}] Getting store state`);
+  const store = useGameStore.getState();
+  console.log(`[INIT-${initCount}] Store state:`, {
+    hasGameClient: !!store.gameClient,
+    isConnected: store.isConnected,
+    isConnecting: store.isConnecting
+  });
+  
+  if (!store.gameClient) {
+    console.log(`[INIT-${initCount}] Calling initializeGame`);
+    store.initializeGame();
+    console.log(`[INIT-${initCount}] Calling connectToServer`);
+    store.connectToServer('Player');
+  } else {
+    console.log(`[INIT-${initCount}] GameClient already exists, skipping`);
+  }
+};
+
+let renderCount = 0;
 function MainGame() {
-  const { isConnected, isConnecting, connectToServer, initializeGame } = useGameStore();
+  const currentRender = ++renderCount;
+  console.log(`\n[RENDER-${currentRender}] ========== MainGame render START ==========`);
+  
+  // Track renders for infinite loop detection
+  loopDetector.track('MainGame');
+  
+  const isConnected = useGameStore(state => state.isConnected);
+  const isConnecting = useGameStore(state => state.isConnecting);
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
-  const theme = useTheme();
 
-  // Auto-connect on component mount
+  console.log(`[RENDER-${currentRender}] State:`, { isConnected, isConnecting, activePanel });
+
+  // Initialize once when component first mounts
   useEffect(() => {
-    if (!isConnected && !isConnecting) {
-      // Initialize the game client first
-      initializeGame();
-      // Then connect to server
-      connectToServer('Player');
-    }
-  }, [isConnected, isConnecting, connectToServer, initializeGame]);
+    console.log(`[EFFECT-${currentRender}] MainGame mount effect running`);
+    initializeGameOnce();
+    
+    return () => {
+      console.log(`[EFFECT-${currentRender}] MainGame unmount cleanup`);
+    };
+  }, []); // Empty dependency array - only run once on mount
+  
+  console.log(`[RENDER-${currentRender}] ========== MainGame render END ==========\n`);
 
   const handleOpenPanel = (panelName: string) => {
     setActivePanel(panelName);
@@ -191,7 +231,9 @@ function MainGame() {
         height: '100%',
         zIndex: 1
       }}>
-        <Scene3D />
+        <ErrorBoundary>
+          <Scene3D />
+        </ErrorBoundary>
       </Box>
 
       {/* HUD Overlay */}

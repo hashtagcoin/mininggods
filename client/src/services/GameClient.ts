@@ -1,7 +1,10 @@
 import { Client, Room } from "colyseus.js";
 
 export interface GameState {
-  players: Map<string, Player>;
+  players: Record<string, Player>;
+  vehicles: Record<string, Vehicle>;
+  oreNodes: Record<string, OreNode>;
+  worldSeed: number;
   tick: number;
 }
 
@@ -11,6 +14,26 @@ export interface Player {
   x: number;
   y: number;
   credits: number;
+}
+
+export interface Vehicle {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  type: string;
+  status: string;
+  ownerId?: string;
+}
+
+export interface OreNode {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  amount: number;
+  type: string;
 }
 
 export class GameClient {
@@ -32,10 +55,32 @@ export class GameClient {
         name: playerName
       });
 
-      console.log("Successfully joined game room:", this.room.id);
+      console.log(`Connected to game room: ${this.room.roomId}`);
 
       this.room.onStateChange((state) => {
         console.log("Game state updated:", state);
+        console.log("Vehicles in state:", state.vehicles ? Object.keys(state.vehicles).length : 0);
+        
+        if (state.vehicles) {
+          console.log("Vehicles MapSchema:", state.vehicles);
+          console.log("Vehicles type:", typeof state.vehicles);
+          console.log("Is MapSchema?", state.vehicles.constructor.name);
+          
+          // Try different ways to access vehicles
+          const vehicleKeys = [];
+          state.vehicles.forEach((vehicle, key) => {
+            vehicleKeys.push(key);
+            console.log("Vehicle via forEach:", key, vehicle);
+          });
+          console.log("Vehicle keys from forEach:", vehicleKeys);
+          
+          // Also try direct access
+          const firstVehicleId = Object.keys(state.vehicles)[0];
+          if (firstVehicleId) {
+            const firstVehicle = state.vehicles[firstVehicleId];
+            console.log("First vehicle via direct access:", firstVehicle);
+          }
+        }
         
         const currentPlayerCount = Object.keys(state.players).length;
         if (currentPlayerCount > this.previousPlayerCount) {

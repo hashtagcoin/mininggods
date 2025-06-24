@@ -1,27 +1,37 @@
-import { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Grid, Text, useGLTF } from '@react-three/drei';
+import { OrbitControls, Text, useGLTF, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { useGameStore } from '../store/gameStore';
+import type { Player, Vehicle } from '../services/GameClient';
+import { 
+  useGameState, 
+  useMyPlayerId, 
+  useSelectedVehicleId, 
+  useGameConnection,
+  useVehicleActions,
+  usePlayerActions,
+  useGameStore
+} from '../store/gameStore';
+import { loopDetector } from '../utils/infiniteLoopDetector';
+
+// Define the app-specific game state interface
+interface AppGameState {
+  players: Record<string, Player>;
+  vehicles: Record<string, Vehicle>;
+  oreNodes?: Record<string, any>;
+}
 
 // Player Avatar Component
-function PlayerAvatar({ 
+const PlayerAvatar = React.memo(({ 
   player, 
   isMe = false 
 }: { 
   player: { id: string; name: string; x: number; y: number; credits: number }, 
   isMe?: boolean 
-}) {
+}) => {
   const meshRef = useRef<THREE.Mesh>(null);
   
-  // Animate the player slightly for visual feedback
-  useFrame((state) => {
-    if (meshRef.current) {
-      meshRef.current.position.y = player.y + Math.sin(state.clock.elapsedTime * 2) * 0.1;
-    }
-  });
-
   return (
     <group position={[player.x, player.y, 0]}>
       {/* Player Cube */}
@@ -34,35 +44,42 @@ function PlayerAvatar({
         />
       </mesh>
       
-      {/* Player Name Label */}
-      <Text
-        position={[0, 3, 0]}
-        fontSize={0.5}
-        color={isMe ? '#ff6b35' : '#ffffff'}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {player.name}
-        {isMe && ' (You)'}
-      </Text>
-      
-      {/* Credits Display */}
-      <Text
-        position={[0, 2.5, 0]}
-        fontSize={0.3}
-        color="#ffc107"
-        anchorX="center"
-        anchorY="middle"
-      >
-        ${player.credits}
-      </Text>
+      {/* Only show labels for selected/nearby players to reduce text rendering cost */}
+      {isMe && (
+        <>
+          {/* Player Name Label */}
+          <Text
+            position={[0, 3, 0]}
+            fontSize={0.5}
+            color="#ffffff"
+            anchorX="center"
+            anchorY="middle"
+          >
+            {player.name}
+            {isMe && ' (You)'}
+          </Text>
+          
+          {/* Credits Display */}
+          <Text
+            position={[0, 2.5, 0]}
+            fontSize={0.3}
+            color="#ffc107"
+            anchorX="center"
+            anchorY="middle"
+          >
+            ${player.credits}
+          </Text>
+        </>
+      )}
     </group>
   );
-}
+});
 
 // Terrain Component - More mountainous terrain
 function Terrain() {
   const meshRef = useRef<THREE.Mesh>(null);
+  
+  console.log('[Terrain] Component rendering');
   
   // Terrain parameters - more mountainous
   const worldWidth = 128;
@@ -71,6 +88,7 @@ function Terrain() {
   
   // Generate height data using enhanced noise for more mountains
   const generateHeightData = (width: number, height: number) => {
+    console.log('[Terrain] Generating height data - width:', width, 'height:', height);
     const size = width * height;
     const data = new Float32Array(size);
     
@@ -92,6 +110,7 @@ function Terrain() {
       data[i] = noise(x, y) * 6.0; // Much more mountainous
     }
     
+    console.log('[Terrain] Height data generated - sample values:', data[0], data[100], data[1000]);
     return data;
   };
   
@@ -115,33 +134,59 @@ function Terrain() {
       return heightData[index] || 0;
     };
     
+    // Function to calculate terrain normal at a position
+    (window as any).getTerrainNormal = (x: number, z: number): THREE.Vector3 => {
+      const delta = 1.0; // Sample distance
+      
+      // Get heights at nearby points
+      const hL = (window as any).getTerrainHeight(x - delta, z);
+      const hR = (window as any).getTerrainHeight(x + delta, z);
+      const hD = (window as any).getTerrainHeight(x, z - delta);
+      const hU = (window as any).getTerrainHeight(x, z + delta);
+      
+      // Calculate normal vector
+      const normal = new THREE.Vector3(hL - hR, 2.0 * delta, hD - hU);
+      normal.normalize();
+      
+      return normal;
+    };
+    
     return () => {
       // Cleanup on unmount
       delete (window as any).getTerrainHeight;
+      delete (window as any).getTerrainNormal;
     };
   }, [heightData, worldWidth, worldDepth, terrainSize]);
   
   // Generate terrain geometry
   const terrainGeometry = useMemo(() => {
-    const geometry = new THREE.PlaneGeometry(
-      terrainSize, 
-      terrainSize, 
-      worldWidth - 1, 
-      worldDepth - 1
-    );
-    
-    geometry.rotateX(-Math.PI / 2); // Make it horizontal
-    
-    const vertices = geometry.attributes.position.array as Float32Array;
-    
-    // Apply height data to vertices
-    for (let i = 0, j = 0; i < heightData.length; i++, j += 3) {
-      vertices[j + 1] = heightData[i]; // Y coordinate
+    console.log('[Terrain] Creating terrain geometry');
+    try {
+      const geometry = new THREE.PlaneGeometry(
+        terrainSize, 
+        terrainSize, 
+        worldWidth - 1, 
+        worldDepth - 1
+      );
+      
+      geometry.rotateX(-Math.PI / 2); // Make it horizontal
+      
+      const vertices = geometry.attributes.position.array as Float32Array;
+      console.log('[Terrain] Vertices length:', vertices.length, 'heightData length:', heightData.length);
+      
+      // Apply height data to vertices
+      for (let i = 0, j = 0; i < heightData.length; i++, j += 3) {
+        vertices[j + 1] = heightData[i]; // Y coordinate
+      }
+      
+      geometry.computeVertexNormals(); // Recalculate normals for proper lighting
+      console.log('[Terrain] Geometry created successfully');
+      
+      return geometry;
+    } catch (error) {
+      console.error('[Terrain] Error creating geometry:', error);
+      throw error;
     }
-    
-    geometry.computeVertexNormals(); // Recalculate normals for proper lighting
-    
-    return geometry;
   }, [heightData]);
 
   return (
@@ -149,35 +194,45 @@ function Terrain() {
       ref={meshRef}
       receiveShadow
       position={[0, 0, 0]}
+      onError={(error) => {
+        console.error('[Terrain] Mesh rendering error:', error);
+      }}
     >
       <primitive object={terrainGeometry} />
       <meshLambertMaterial 
         map={useMemo(() => {
-          const canvas = document.createElement('canvas');
-          canvas.width = worldWidth;
-          canvas.height = worldDepth;
-          const context = canvas.getContext('2d')!;
-          
-          const imageData = context.createImageData(worldWidth, worldDepth);
-          const data = imageData.data;
-          
-          // Generate a simple dirt/rock texture
-          for (let i = 0; i < data.length; i += 4) {
-            const noise = Math.random() * 0.3 + 0.4; // Random variation
-            data[i] = Math.floor(101 * noise);     // R - brownish
-            data[i + 1] = Math.floor(67 * noise);  // G
-            data[i + 2] = Math.floor(33 * noise);  // B
-            data[i + 3] = 255;                     // A
+          console.log('[Terrain] Creating terrain texture');
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = worldWidth;
+            canvas.height = worldDepth;
+            const context = canvas.getContext('2d')!;
+            
+            const imageData = context.createImageData(worldWidth, worldDepth);
+            const data = imageData.data;
+            
+            // Generate a simple dirt/rock texture
+            for (let i = 0; i < data.length; i += 4) {
+              const noise = Math.random() * 0.3 + 0.4; // Random variation
+              data[i] = Math.floor(101 * noise);     // R - brownish
+              data[i + 1] = Math.floor(67 * noise);  // G
+              data[i + 2] = Math.floor(33 * noise);  // B
+              data[i + 3] = 255;                     // A
+            }
+            
+            context.putImageData(imageData, 0, 0);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(4, 4); // Tile the texture
+            
+            console.log('[Terrain] Texture created successfully');
+            return texture;
+          } catch (error) {
+            console.error('[Terrain] Error creating texture:', error);
+            throw error;
           }
-          
-          context.putImageData(imageData, 0, 0);
-          
-          const texture = new THREE.CanvasTexture(canvas);
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          texture.repeat.set(4, 4); // Tile the texture
-          
-          return texture;
         }, [])}
         side={THREE.DoubleSide}
       />
@@ -189,10 +244,12 @@ function Terrain() {
 function Ore({ 
   id, 
   position, 
+  rotation,
   onMined 
 }: { 
   id: string;
   position: [number, number, number];
+  rotation: [number, number, number];
   onMined: (id: string) => void;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -201,30 +258,28 @@ function Ore({
   const [isMining, setIsMining] = useState(false);
   
   // Load ore model
-  const { scene } = useGLTF('/ore1.glb');
+  // Note: useGLTF is a hook and must not be called conditionally
+  const gltf = useGLTF('/ore1.glb');
+  const scene = gltf?.scene;
   
-  // Mine the ore when touched by miner
-  useFrame((state, delta) => {
-    if (isMining && miningProgress > 0) {
-      setMiningProgress(prev => {
-        const newProgress = Math.max(0, prev - delta * 0.2); // Mine at 20% per second
-        if (newProgress <= 0) {
-          onMined(id); // Notify parent to remove this ore
-        }
-        return newProgress;
-      });
-    }
+  // Throttle collision detection to every 10 frames (~6 times per second at 60fps)
+  const collisionCheckCounter = useRef(0);
+  
+  // Get gameState outside of the callback to avoid store access in render loop
+  const gameState = useGameState();
+  
+  // Store gameState vehicles in a ref to avoid dependency changes
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+  
+  // Check for miner collision - THROTTLED for performance
+  const checkMinerCollision = useCallback(() => {
+    const currentGameState = gameStateRef.current;
+    if (!currentGameState || !currentGameState.vehicles) return;
     
-    // Update visual scale based on mining progress
-    if (groupRef.current) {
-      const scale = 0.5 + (miningProgress * 0.5); // Scale from 0.5 to 1.0
-      groupRef.current.scale.set(scale, scale, scale);
-    }
-  });
-  
-  // Check for miner collision
-  const checkMinerCollision = () => {
-    const vehicles = useGameStore.getState().vehicles;
+    const vehicles = Object.values(currentGameState.vehicles);
     const miners = vehicles.filter(v => v.type === 'miner');
     
     for (const miner of miners) {
@@ -239,18 +294,66 @@ function Ore({
       }
     }
     setIsMining(false);
-  };
+  }, [position]);
   
-  useFrame(() => {
-    checkMinerCollision();
+  // Use refs to avoid state updates in render loop
+  const miningProgressRef = useRef(miningProgress);
+  const isMiningRef = useRef(isMining);
+  
+  useEffect(() => {
+    miningProgressRef.current = miningProgress;
+  }, [miningProgress]);
+  
+  useEffect(() => {
+    isMiningRef.current = isMining;
+  }, [isMining]);
+  
+  // Optimized useFrame - only check collision every 10 frames
+  useFrame((_state, delta) => {
+    // Throttle collision detection
+    collisionCheckCounter.current++;
+    if (collisionCheckCounter.current >= 10) {
+      checkMinerCollision();
+      collisionCheckCounter.current = 0;
+    }
+    
+    // Only process mining if actually mining - use refs to avoid state updates
+    if (isMiningRef.current && miningProgressRef.current > 0) {
+      const newProgress = Math.max(0, miningProgressRef.current - delta * 0.1); // 10 seconds to mine
+      miningProgressRef.current = newProgress;
+      
+      // Only update state every 0.5 seconds to avoid too many re-renders
+      if (Math.floor(newProgress * 10) !== Math.floor(miningProgress * 10)) {
+        setMiningProgress(newProgress);
+      }
+      
+      if (newProgress <= 0) {
+        onMined(id);
+        setIsMining(false);
+      }
+    }
   });
+
+  const clonedScene = useMemo(() => scene?.clone(), [scene]);
   
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
+  // Fallback if model doesn't load
+  if (!scene) {
+    console.warn('[Ore] Using fallback mesh as model failed to load');
+    return (
+      <group ref={groupRef} position={position} rotation={rotation}>
+        <mesh ref={meshRef} castShadow>
+          <octahedronGeometry args={[1]} />
+          <meshLambertMaterial color="#8B4513" />
+        </mesh>
+      </group>
+    );
+  }
   
   return (
     <group 
       ref={groupRef}
       position={position}
+      rotation={rotation}
     >
       <primitive 
         ref={meshRef}
@@ -267,7 +370,6 @@ function Ore({
           color="#ffeb3b"
           anchorX="center"
           anchorY="middle"
-          Billboard
         >
           {`Mining: ${Math.round(miningProgress * 100)}%`}
         </Text>
@@ -285,215 +387,368 @@ function Ore({
 }
 
 // Vehicle Component with Turn-Then-Move Logic
-function Vehicle({ 
+const Vehicle = React.memo(({ 
   vehicle, 
   isSelected = false 
 }: { 
   vehicle: { id: string; name: string; x: number; y: number; z: number; type: string; status: string }, 
   isSelected?: boolean 
-}) {
+}) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
-  const { selectVehicle, selectedVehicleId } = useGameStore();
+  const arrowRef = useRef<THREE.Group>(null);
+  const { selectVehicle } = useVehicleActions();
+  const optimisticPosition = useGameStore(state => state.optimisticVehiclePositions[vehicle.id]);
   const [hovered, setHovered] = useState(false);
+  const [isVehicleMoving, setIsVehicleMoving] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
+  
+  // Debug log vehicle data
+  console.log(`[Vehicle ${vehicle.id}] Rendering at:`, { x: vehicle.x, y: vehicle.y, z: vehicle.z, type: vehicle.type });
   
   // Load GLB model from public directory
-  const { scene } = useGLTF('/miner2.glb');
+  // Note: useGLTF is a hook and must not be called conditionally
+  const gltf = useGLTF('/miner2.glb');
+  const scene = gltf?.scene;
   
-  // Get terrain height at vehicle position
-  const getTerrainHeightAt = (x: number, z: number): number => {
+  // Get vehicle position with optimistic updates
+  const vehiclePosition = useMemo(() => {
+    const basePos = optimisticPosition 
+      ? { x: optimisticPosition.x, y: vehicle.y, z: optimisticPosition.z }
+      : { x: vehicle.x, y: vehicle.y, z: vehicle.z };
+    
+    // Get terrain height at vehicle position
     const getHeight = (window as any).getTerrainHeight;
     if (getHeight) {
-      return getHeight(x, z);
+      const terrainHeight = getHeight(basePos.x, basePos.z);
+      basePos.y = terrainHeight + 0.07; // Small offset to keep vehicle above ground
     }
-    return 0; // Fallback if terrain not ready
-  };
-  
-  // Local position and rotation state for smooth interpolation
-  const [currentPos, setCurrentPos] = useState(() => ({
-    x: vehicle.x,
-    y: getTerrainHeightAt(vehicle.x, vehicle.z) + 0.5, // Hug terrain with small offset
-    z: vehicle.z
-  }));
-  
-  const [currentRotation, setCurrentRotation] = useState(0);
-  const [targetRotation, setTargetRotation] = useState(0);
-  const [isRotating, setIsRotating] = useState(false);
-  const [movementPhase, setMovementPhase] = useState<'idle' | 'rotating' | 'moving'>('idle');
-
-  // Calculate target rotation when vehicle position changes
-  useEffect(() => {
-    const deltaX = vehicle.x - currentPos.x;
-    const deltaZ = vehicle.z - currentPos.z;
     
-    // Only update rotation if vehicle is actually moving
-    if (Math.abs(deltaX) > 0.1 || Math.abs(deltaZ) > 0.1) {
-      const angle = Math.atan2(deltaX, deltaZ);
-      setTargetRotation(angle);
-      setMovementPhase('rotating'); // Start with rotation phase
-    } else {
-      setMovementPhase('idle');
+    return basePos;
+  }, [vehicle.x, vehicle.y, vehicle.z, optimisticPosition]);
+  
+  // Memoize vehicle color calculation
+  const vehicleColor = useMemo(() => {
+    switch (vehicle.type) {
+      case 'miner': return '#FF6B35';
+      case 'hauler': return '#2196F3';
+      case 'scout': return '#9C27B0';
+      default: return '#757575';
     }
-  }, [vehicle.x, vehicle.z]);
-
-  // Turn-then-move logic with constant velocity
+  }, [vehicle.type]);
+  
+  // Throttled position and rotation updates (reduced from every frame to ~20fps)
+  const lastUpdateTime = useRef(0);
+  const currentPos = useRef(new THREE.Vector3(vehiclePosition.x, vehiclePosition.y, vehiclePosition.z));
+  const currentRotation = useRef(0);
+  const targetRotation = useRef(0);
+  const isMoving = useRef(false);
+  const moveStartTime = useRef(0);
+  const moveDistance = useRef(0);
+  
+  // Initialize position with terrain height
+  useEffect(() => {
+    const getHeight = (window as any).getTerrainHeight;
+    if (getHeight) {
+      const terrainHeight = getHeight(vehiclePosition.x, vehiclePosition.z);
+      currentPos.current.set(vehiclePosition.x, terrainHeight + 0.07, vehiclePosition.z);
+    }
+  }, []); // Only on mount
+  
+  // Update current position ref when vehicle position changes
+  useEffect(() => {
+    const newTargetPos = new THREE.Vector3(vehiclePosition.x, vehiclePosition.y, vehiclePosition.z);
+    const currentPosVec = new THREE.Vector3(currentPos.current.x, currentPos.current.y, currentPos.current.z);
+    
+    // Calculate distance and rotation to target
+    const dx = newTargetPos.x - currentPosVec.x;
+    const dz = newTargetPos.z - currentPosVec.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    if (distance > 0.1) { // Only move if distance is significant
+      isMoving.current = true;
+      moveStartTime.current = Date.now();
+      moveDistance.current = distance;
+      
+      // Calculate target rotation (facing direction of movement)
+      targetRotation.current = Math.atan2(dx, dz);
+    }
+  }, [vehiclePosition.x, vehiclePosition.y, vehiclePosition.z]);
+  
   useFrame((state, delta) => {
-    if (groupRef.current) {
-      const rotationLerpFactor = 0.12; // Faster rotation for crisp turning
-      const movementSpeed = 8.0; // Constant movement speed (units per second)
+    if (!groupRef.current) return;
+    
+    const targetPos = new THREE.Vector3(vehiclePosition.x, vehiclePosition.y, vehiclePosition.z);
+    
+    // Update moving state for particles
+    setIsVehicleMoving(isMoving.current);
+    
+    if (isMoving.current) {
+      // Realistic vehicle movement parameters
+      const ROTATION_SPEED = 2.0; // radians per second
+      const ACCELERATION = 3.0; // units per second squared
+      const MAX_SPEED = 8.0; // units per second
+      const DECELERATION = 5.0; // units per second squared
       
-      // Sample terrain height at current vehicle position
-      const terrainHeight = getTerrainHeightAt(currentPos.x, currentPos.z);
-      const targetY = terrainHeight + 0.5; // Small offset to sit on terrain surface
+      // First rotate towards target
+      const rotationDiff = targetRotation.current - currentRotation.current;
+      const normalizedDiff = ((rotationDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
       
-      if (movementPhase === 'rotating') {
-        // Phase 1: Rotate on the spot until facing destination
-        setCurrentRotation(prev => {
-          let angleDiff = targetRotation - prev;
-          
-          // Handle angle wrapping (shortest path)
-          if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-          if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-          
-          const newRotation = prev + angleDiff * rotationLerpFactor;
-          
-          // Check if rotation is complete (within 0.1 radians)
-          if (Math.abs(angleDiff) < 0.1) {
-            setMovementPhase('moving'); // Switch to movement phase
-          }
-          
-          return newRotation;
-        });
-        
-        // Don't move position while rotating
-        setCurrentPos(prev => ({
-          ...prev,
-          y: THREE.MathUtils.lerp(prev.y, targetY, 0.05) // Still follow terrain height
-        }));
-        
-      } else if (movementPhase === 'moving') {
-        // Phase 2: Move forward at constant velocity
-        const deltaX = vehicle.x - currentPos.x;
-        const deltaZ = vehicle.z - currentPos.z;
-        const distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
-        
-        if (distance > 0.1) {
-          // Move at constant velocity toward target
-          const moveDistance = movementSpeed * delta;
-          const normalizedDeltaX = (deltaX / distance) * moveDistance;
-          const normalizedDeltaZ = (deltaZ / distance) * moveDistance;
-          
-          setCurrentPos(prev => ({
-            x: prev.x + normalizedDeltaX,
-            y: THREE.MathUtils.lerp(prev.y, targetY, 0.05),
-            z: prev.z + normalizedDeltaZ
-          }));
-        } else {
-          // Arrived at destination
-          setCurrentPos(prev => ({
-            x: vehicle.x,
-            y: THREE.MathUtils.lerp(prev.y, targetY, 0.05),
-            z: vehicle.z
-          }));
-          setMovementPhase('idle');
-        }
+      if (Math.abs(normalizedDiff) > 0.05) {
+        // Still rotating
+        currentRotation.current += Math.sign(normalizedDiff) * Math.min(ROTATION_SPEED * delta, Math.abs(normalizedDiff));
       } else {
-        // Phase 3: Idle - just follow terrain height
-        setCurrentPos(prev => ({
-          x: vehicle.x,
-          y: THREE.MathUtils.lerp(prev.y, targetY, 0.05),
-          z: vehicle.z
-        }));
+        // Rotation complete, now move
+        currentRotation.current = targetRotation.current;
+        
+        // Calculate current speed based on distance to target
+        const distanceToTarget = currentPos.current.distanceTo(targetPos);
+        const timeMoving = (Date.now() - moveStartTime.current) / 1000;
+        
+        // Acceleration and deceleration phases
+        let currentSpeed = 0;
+        if (distanceToTarget > moveDistance.current * 0.3) {
+          // Accelerating
+          currentSpeed = Math.min(MAX_SPEED, timeMoving * ACCELERATION);
+        } else {
+          // Decelerating as we approach target
+          currentSpeed = Math.max(0.5, MAX_SPEED * (distanceToTarget / (moveDistance.current * 0.3)));
+        }
+        
+        // Move towards target
+        if (distanceToTarget > 0.1) {
+          const moveAmount = Math.min(currentSpeed * delta, distanceToTarget);
+          const direction = targetPos.clone().sub(currentPos.current).normalize();
+          currentPos.current.add(direction.multiplyScalar(moveAmount));
+          
+          // Update terrain height at new position
+          const getHeight = (window as any).getTerrainHeight;
+          if (getHeight) {
+            currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + 0.07;
+          }
+        } else {
+          // Reached destination
+          isMoving.current = false;
+          currentPos.current.copy(targetPos);
+        }
       }
+    }
+    
+    // Apply position and rotation
+    groupRef.current.position.copy(currentPos.current);
+    groupRef.current.rotation.y = currentRotation.current;
+    
+    // Apply terrain angle rotation
+    const getTerrainNormal = (window as any).getTerrainNormal;
+    if (getTerrainNormal) {
+      const normal = getTerrainNormal(currentPos.current.x, currentPos.current.z);
       
-      groupRef.current.position.set(currentPos.x, currentPos.y, currentPos.z);
-      groupRef.current.rotation.y = currentRotation;
+      // Calculate pitch and roll from terrain normal
+      const pitch = Math.atan2(normal.z, normal.y); // Rotation around X axis
+      const roll = Math.atan2(-normal.x, normal.y);  // Rotation around Z axis
+      
+      // Apply terrain tilt with some damping for smooth transitions
+      const dampingFactor = 0.1;
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(groupRef.current.rotation.x, pitch, dampingFactor);
+      groupRef.current.rotation.z = THREE.MathUtils.lerp(groupRef.current.rotation.z, roll, dampingFactor);
+    }
+    
+    // Add slight bobbing motion when moving
+    if (isMoving.current && vehicle.status === 'moving') {
+      const bobAmount = Math.sin(state.clock.elapsedTime * 5) * 0.2; // Larger bob for bigger vehicle
+      groupRef.current.position.y += bobAmount;
+    }
+    
+    // Animate arrow indicator
+    if (arrowRef.current) {
+      // Bounce animation - higher and more visible
+      arrowRef.current.position.y = 30 + Math.sin(state.clock.elapsedTime * 2) * 5;
+      // Rotation animation
+      arrowRef.current.rotation.y = state.clock.elapsedTime * 0.5;
+      // Pulse scale animation
+      const scale = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.1;
+      arrowRef.current.scale.set(scale, scale, scale);
     }
   });
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     selectVehicle(vehicle.id);
-  };
-
-  // Vehicle type colors
-  const getVehicleColor = (type: string) => {
-    switch (type.toLowerCase()) {
-      case 'miner': return '#ff9800'; // Orange
-      case 'hauler': return '#2196f3'; // Blue  
-      case 'scout': return '#9c27b0'; // Purple
-      default: return '#4caf50'; // Green
-    }
-  };
-
-  // Clone the scene to avoid modifying the original
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
+    
+    // Trigger flash effect
+    setIsFlashing(true);
+    setTimeout(() => setIsFlashing(false), 300);
+    
+    console.log(`[Vehicle ${vehicle.id}] Clicked - selected`);
+  }, [selectVehicle, vehicle.id]);
 
   return (
-    <group 
-      ref={groupRef}
-      onClick={handleClick}
-      onPointerOver={() => setHovered(true)}
-      onPointerOut={() => setHovered(false)}
-      scale={[2, 2, 2]} // Double the size (2x larger)
-    >
+    <group ref={groupRef} position={[vehiclePosition.x, vehiclePosition.y, vehiclePosition.z]}>
       {/* Vehicle Model */}
-      <primitive 
-        ref={meshRef}
-        object={clonedScene}
-        castShadow
-        receiveShadow
-      />
-      
-      {/* Selection Ring */}
-      {(isSelected || selectedVehicleId === vehicle.id) && (
-        <mesh position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[1.5, 2, 32]} />
-          <meshBasicMaterial color="#00ff00" transparent opacity={0.5} />
+      {scene ? (
+        <primitive 
+          ref={meshRef}
+          object={scene}
+          scale={[2, 2, 2]}
+          onClick={handleClick}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
+        />
+      ) : (
+        // Fallback mesh if model doesn't load - 4x larger
+        <mesh 
+          ref={meshRef}
+          castShadow
+          receiveShadow
+          onClick={handleClick}
+          onPointerOver={() => setHovered(true)}
+          onPointerOut={() => setHovered(false)}
+        >
+          <boxGeometry args={[12, 8, 16]} />
+          <meshStandardMaterial 
+            color={isFlashing ? "#ffff00" : vehicleColor} 
+            emissive={isFlashing ? "#ffff00" : vehicleColor}
+            emissiveIntensity={isFlashing ? 1 : 0.2}
+            metalness={0.6}
+            roughness={0.4}
+          />
         </mesh>
       )}
       
-      {/* Hover Ring */}
-      {hovered && (
-        <mesh position={[0, -0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[1.2, 1.8, 32]} />
-          <meshBasicMaterial color="#ffffff" transparent opacity={0.3} />
+      {/* Selection Ring - render on ground level - larger for 4x vehicle */}
+      {(isSelected || hovered) && (
+        <mesh position={[0, -4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[14, 18, 64]} />
+          <meshBasicMaterial 
+            color={isSelected ? "#ff6b35" : "#ffff00"} 
+            transparent 
+            opacity={1}
+            side={THREE.DoubleSide}
+            depthTest={false}
+            depthWrite={false}
+          />
         </mesh>
       )}
       
-      {/* Vehicle Name Label */}
-      <Text
-        position={[0, 3, 0]} // Higher up since vehicle is 2x larger
-        fontSize={0.4} // Slightly larger text
-        color={getVehicleColor(vehicle.type)}
-        anchorX="center"
-        anchorY="middle"
-        Billboard
-      >
-        {vehicle.name}
-      </Text>
+      {/* Status indicator - only for selected vehicles - positioned higher for larger vehicle */}
+      {isSelected && (
+        <>
+          <Text
+            position={[0, 12, 0]}
+            fontSize={1.6}
+            color="#ffffff"
+            anchorX="center"
+            anchorY="middle"
+          >
+            {vehicle.name}
+          </Text>
+          
+          <Text
+            position={[0, 10, 0]}
+            fontSize={1.2}
+            color={vehicleColor}
+            anchorX="center"
+            anchorY="middle"
+          >
+            {vehicle.status.toUpperCase()}
+          </Text>
+        </>
+      )}
       
-      {/* Status Indicator */}
-      <Text
-        position={[0, 2.5, 0]} // Adjusted for larger vehicle
-        fontSize={0.25}
-        color={vehicle.status === 'idle' ? '#ffeb3b' : '#4caf50'}
-        anchorX="center"
-        anchorY="middle"
-        Billboard
-      >
-        {vehicle.status}
-      </Text>
+      {/* Exhaust Smoke Effect - scaled for larger vehicle */}
+      {isVehicleMoving && (
+        <group position={[-6, 4, 0]}>
+          {[...Array(5)].map((_, i) => (
+            <mesh
+              key={`smoke-${i}`}
+              position={[
+                Math.random() * 2 - 1,
+                i * 1.2,
+                Math.random() * 2 - 1
+              ]}
+            >
+              <sphereGeometry args={[0.8 + i * 0.4, 8, 8]} />
+              <meshBasicMaterial
+                color="#333333"
+                transparent
+                opacity={0.4 - i * 0.08}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
+      
+      {/* Dust Cloud Effect - scaled for larger vehicle */}
+      {isVehicleMoving && (
+        <group position={[0, 0.8, -8]}>
+          {[...Array(8)].map((_, i) => (
+            <mesh
+              key={`dust-${i}`}
+              position={[
+                Math.sin(i * 0.8) * 6,
+                Math.random() * 2,
+                Math.cos(i * 0.8) * 6
+              ]}
+              rotation={[-Math.PI / 2, 0, 0]}
+            >
+              <planeGeometry args={[3.2, 3.2]} />
+              <meshBasicMaterial
+                color="#8B7355"
+                transparent
+                opacity={0.3 - i * 0.03}
+                side={THREE.DoubleSide}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
+      
+      {/* Animated Arrow Indicator - Always visible */}
+      <group ref={arrowRef} position={[0, 25, 0]}>
+        <mesh rotation={[Math.PI, 0, 0]}>
+          <coneGeometry args={[5, 10, 8]} />
+          <meshBasicMaterial 
+            color="#00ff00"
+            transparent
+            opacity={0.9}
+          />
+        </mesh>
+        <mesh position={[0, 6, 0]}>
+          <cylinderGeometry args={[2.5, 2.5, 12, 8]} />
+          <meshBasicMaterial 
+            color="#00ff00"
+            transparent
+            opacity={0.9}
+          />
+        </mesh>
+        {/* Add brighter glow effect */}
+        <pointLight 
+          color="#00ff00"
+          intensity={5}
+          distance={50}
+          decay={1}
+        />
+        {/* Add outer glow mesh */}
+        <mesh>
+          <sphereGeometry args={[8, 16, 16]} />
+          <meshBasicMaterial 
+            color="#00ff00"
+            transparent
+            opacity={0.2}
+          />
+        </mesh>
+      </group>
     </group>
   );
-}
+});
 
 // Dynamic Time-of-Day Lighting Component
 function DynamicLighting() {
   const lightRef = useRef<THREE.DirectionalLight>(null);
-  const [timeOfDay, setTimeOfDay] = useState(0); // 0-1 representing 24 hour cycle
+  const [timeOfDay] = useState(0.5); // Fixed at midday (0.5) for permanent daylight
   
-  // Automatically cycle through time of day (11 minute cycle: 10 min day + 1 min night)
+  // Automatic time cycling disabled - keeping it permanently at midday
+  /*
   useFrame((state, delta) => {
     setTimeOfDay(prev => {
       const dayDuration = 600; // 10 minutes in seconds
@@ -516,6 +771,7 @@ function DynamicLighting() {
       }
     });
   });
+  */
   
   // Calculate sun position based on time of day
   const sunPosition = useMemo(() => {
@@ -533,7 +789,7 @@ function DynamicLighting() {
     
     // Define color periods
     let sunColor = '#ffffff';
-    let ambientColor = '#404040';
+    let ambientColor = '#606060';
     let intensity = 1;
     let ambientIntensity = 0.3;
     
@@ -579,7 +835,7 @@ function DynamicLighting() {
   // Update light reference when position changes
   useEffect(() => {
     if (lightRef.current) {
-      lightRef.current.position.set(...sunPosition);
+      lightRef.current.position.set(sunPosition[0], sunPosition[1], sunPosition[2]);
     }
   }, [sunPosition]);
   
@@ -594,7 +850,7 @@ function DynamicLighting() {
       {/* Dynamic Sun/Moon Light */}
       <directionalLight 
         ref={lightRef}
-        position={sunPosition}
+        position={sunPosition as [number, number, number]}
         intensity={lightingColors.intensity}
         color={lightingColors.sunColor}
         castShadow
@@ -670,33 +926,56 @@ function IsometricCameraController() {
       // Zoom limits
       minDistance={10}
       maxDistance={100}
-      // Smooth controls
+      // Smooth controls with performance optimizations
       enableDamping={true}
       dampingFactor={0.05}
-      // Disable auto-rotate
-      autoRotate={false}
+      // Performance optimizations
+      screenSpacePanning={true}
+      // Reduce update frequency for better performance
+      rotateSpeed={0.5}
+      zoomSpeed={0.8}
+      panSpeed={0.8}
+      // Add touch support optimizations
+      touches={{
+        ONE: 2, // ROTATE
+        TWO: 1  // DOLLY_PAN
+      }}
+      // Passive event listeners configuration
+      listenToKeyEvents={false} // Disable keyboard listeners for performance
     />
   );
 }
 
 // Interactive Ground Plane for Movement
-function InteractiveGround() {
-  const { moveVehicle, movePlayer, selectedVehicleId, isConnected, myPlayerId } = useGameStore();
-  
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    if (!isConnected || !myPlayerId) return;
+const InteractiveGround = React.memo(() => {
+  const isConnected = useGameConnection();
+  const myPlayerId = useMyPlayerId();
+  const selectedVehicleId = useSelectedVehicleId();
+  const { moveVehicle } = useVehicleActions();
+  const { movePlayer } = usePlayerActions();
+
+  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    console.log('[InteractiveGround] Clicked at:', event.point);
+    console.log('[InteractiveGround] Connected:', isConnected, 'PlayerId:', myPlayerId, 'SelectedVehicle:', selectedVehicleId);
+    
+    if (!isConnected || !myPlayerId) {
+      console.log('[InteractiveGround] Not connected or no player ID');
+      return;
+    }
     
     const point = event.point;
     if (point) {
       if (selectedVehicleId) {
+        console.log(`[InteractiveGround] Moving vehicle ${selectedVehicleId} to:`, point.x, point.z);
         // Move selected vehicle (Y=0 for ground level, Z for forward/back movement)
         moveVehicle(selectedVehicleId, point.x, 0, point.z);
       } else {
+        console.log(`[InteractiveGround] Moving player to:`, point.x, point.z);
         // Move player (Y=0 for ground level, Z for forward/back movement)
         movePlayer(point.x, 0, point.z);
       }
     }
-  };
+  }, [isConnected, myPlayerId, selectedVehicleId, moveVehicle, movePlayer]);
 
   return (
     <>
@@ -706,40 +985,62 @@ function InteractiveGround() {
       {/* Invisible click plane for movement (above terrain) */}
       <mesh 
         rotation={[-Math.PI / 2, 0, 0]} 
-        position={[0, 0.1, 0]}
+        position={[0, 5, 0]}
         onClick={handleClick}
         visible={false}
       >
-        <planeGeometry args={[200, 200]} />
+        <planeGeometry args={[400, 400]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
     </>
   );
-}
+});
 
 // Scattered Ores Component
 function ScatteredOres() {
-  const [ores, setOres] = useState<Array<{id: string, position: [number, number, number]}>>([]);
+  const [ores, setOres] = useState<Array<{id: string, position: [number, number, number], rotation: [number, number, number]}>>([]);
   
-  // Generate random ore positions on terrain
+  // Generate clumped ore positions on terrain
   useEffect(() => {
     const generateOres = () => {
-      const oreCount = 15; // Number of ore deposits
+      const clumpCount = 5; // Number of ore clumps
+      const oresPerClump = 8; // Number of ores in each clump
+      const clumpRadius = 6; // Radius of each clump
       const newOres = [];
+      let oreId = 0;
       
-      for (let i = 0; i < oreCount; i++) {
-        // Random position within terrain bounds
-        const x = (Math.random() - 0.5) * 180; // Slightly within terrain bounds
-        const z = (Math.random() - 0.5) * 180;
+      for (let clump = 0; clump < clumpCount; clump++) {
+        // Random center position for each clump within terrain bounds
+        const centerX = (Math.random() - 0.5) * 160; // Keep clumps away from edges
+        const centerZ = (Math.random() - 0.5) * 160;
         
-        // Get terrain height at this position
-        const getHeight = (window as any).getTerrainHeight;
-        const y = getHeight ? getHeight(x, z) + 0.5 : 0.5;
-        
-        newOres.push({
-          id: `ore_${i}`,
-          position: [x, y, z] as [number, number, number]
-        });
+        // Generate ores within this clump
+        for (let ore = 0; ore < oresPerClump; ore++) {
+          // Position ores in a circular pattern around the center
+          const angle = (ore / oresPerClump) * Math.PI * 2;
+          const distance = Math.random() * clumpRadius;
+          
+          // Add some randomness to avoid perfect circles
+          const randomOffset = (Math.random() - 0.5) * 2;
+          
+          const x = centerX + Math.cos(angle) * distance + randomOffset;
+          const z = centerZ + Math.sin(angle) * distance + randomOffset;
+          
+          // Get terrain height at this position
+          const getHeight = (window as any).getTerrainHeight;
+          const y = getHeight ? getHeight(x, z) + 0.5 : 0.5;
+          
+          // Generate random rotation for variety
+          const rotationX = Math.random() * Math.PI * 2;
+          const rotationY = Math.random() * Math.PI * 2;
+          const rotationZ = Math.random() * Math.PI * 2;
+          
+          newOres.push({
+            id: `ore_${oreId++}`,
+            position: [x, y, z] as [number, number, number],
+            rotation: [rotationX, rotationY, rotationZ] as [number, number, number]
+          });
+        }
       }
       
       setOres(newOres);
@@ -762,6 +1063,7 @@ function ScatteredOres() {
           key={ore.id}
           id={ore.id}
           position={ore.position}
+          rotation={ore.rotation}
           onMined={handleOreMined}
         />
       ))}
@@ -769,9 +1071,93 @@ function ScatteredOres() {
   );
 }
 
-// Main Scene Component
-function Scene3D() {
-  const { gameState, myPlayerId, isConnected, selectedVehicleId } = useGameStore();
+// Scene render counter
+let sceneRenderCount = 0;
+
+// Main Scene Component with better memoization
+const Scene3D = React.memo(() => {
+  const currentRender = ++sceneRenderCount;
+  console.log(`\n[SCENE3D-${currentRender}] ========== Scene3D render START ==========`);
+  
+  // Track renders for infinite loop detection
+  loopDetector.track('Scene3D');
+  
+  const isConnected = useGameConnection();
+  const gameState = useGameState() as AppGameState | null;
+  const myPlayerId = useMyPlayerId();
+  const selectedVehicleId = useSelectedVehicleId();
+
+  console.log(`[SCENE3D-${currentRender}] Props:`, {
+    isConnected,
+    hasGameState: !!gameState,
+    myPlayerId,
+    selectedVehicleId,
+    playerCount: gameState?.players ? Object.keys(gameState.players).length : 0,
+    vehicleCount: gameState?.vehicles ? Object.keys(gameState.vehicles).length : 0
+  });
+
+  // Memoize players and vehicles to prevent re-renders
+  const players = useMemo(() => {
+    if (!gameState?.players) {
+      console.log(`[SCENE3D-${currentRender}] No players in gameState`);
+      return [];
+    }
+    
+    // Handle MapSchema properly
+    const playerArray = [];
+    if (gameState.players.forEach) {
+      // It's a MapSchema
+      gameState.players.forEach((player, playerId) => {
+        playerArray.push([playerId, player]);
+      });
+    } else {
+      // Fallback to Object.entries
+      Object.entries(gameState.players).forEach(([playerId, player]) => {
+        playerArray.push([playerId, player]);
+      });
+    }
+    
+    console.log(`[SCENE3D-${currentRender}] Total players found: ${playerArray.length}`);
+    return playerArray;
+  }, [gameState?.players]);
+  
+  const vehicles = useMemo(() => {
+    if (!gameState?.vehicles) {
+      console.log(`[SCENE3D-${currentRender}] No vehicles in gameState`);
+      return [];
+    }
+    
+    console.log(`[SCENE3D-${currentRender}] Processing vehicles, type:`, typeof gameState.vehicles);
+    
+    // Handle MapSchema properly
+    const vehicleArray = [];
+    if (gameState.vehicles.forEach) {
+      // It's a MapSchema
+      gameState.vehicles.forEach((vehicle, vehicleId) => {
+        console.log(`[SCENE3D-${currentRender}] Vehicle ${vehicleId}:`, vehicle);
+        vehicleArray.push([vehicleId, vehicle]);
+      });
+    } else {
+      // Fallback to Object.entries
+      Object.entries(gameState.vehicles).forEach(([vehicleId, vehicle]) => {
+        console.log(`[SCENE3D-${currentRender}] Vehicle ${vehicleId}:`, vehicle);
+        vehicleArray.push([vehicleId, vehicle]);
+      });
+    }
+    
+    console.log(`[SCENE3D-${currentRender}] Total vehicles found: ${vehicleArray.length}`);
+    return vehicleArray;
+  }, [gameState?.vehicles]);
+  
+  // Track when component effects run
+  useEffect(() => {
+    console.log(`[SCENE3D-${currentRender}] Component mounted`);
+    return () => {
+      console.log(`[SCENE3D-${currentRender}] Component unmounting`);
+    };
+  }, []);
+  
+  console.log(`[SCENE3D-${currentRender}] Rendering Canvas with ${players.length} players, ${vehicles.length} vehicles`);
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -782,6 +1168,12 @@ function Scene3D() {
           fov: 50
         }}
         style={{ background: 'linear-gradient(to bottom, #1a1a2e 0%, #0f0f23 100%)' }}
+        onCreated={(state) => {
+          console.log('[Scene3D] Canvas created - renderer:', state.gl);
+        }}
+        onError={(error) => {
+          console.error('[Scene3D] Canvas error:', error);
+        }}
       >
         {/* Dynamic Time-of-Day Lighting */}
         <DynamicLighting />
@@ -812,22 +1204,51 @@ function Scene3D() {
         <ScatteredOres />
         
         {/* Render All Players */}
-        {isConnected && gameState?.players && Array.from(gameState.players.entries()).map(([playerId, player]) => (
-          <PlayerAvatar 
-            key={playerId}
-            player={player}
-            isMe={playerId === myPlayerId}
-          />
-        ))}
+        {players.map(([playerId, playerData]) => {
+          const player = playerData as Player;
+          return (
+            <PlayerAvatar
+              key={playerId}
+              player={player}
+              isMe={playerId === myPlayerId}
+            />
+          );
+        })}
         
         {/* Render All Vehicles */}
-        {isConnected && gameState?.vehicles && Array.from(gameState.vehicles.entries()).map(([vehicleId, vehicle]) => (
-          <Vehicle 
-            key={vehicleId}
-            vehicle={vehicle}
-            isSelected={vehicleId === selectedVehicleId}
-          />
-        ))}
+        {vehicles.map(([vehicleId, vehicleData]) => {
+          const vehicle = vehicleData as Vehicle;
+          return (
+            <Vehicle
+              key={vehicleId}
+              vehicle={vehicle}
+              isSelected={vehicleId === selectedVehicleId}
+            />
+          );
+        })}
+        
+        {/* Debug: Show test vehicle when connected but no vehicles */}
+        {isConnected && vehicles.length === 0 && (
+          <group position={[0, 1, 0]}>
+            <mesh castShadow receiveShadow>
+              <boxGeometry args={[4, 2, 5]} />
+              <meshStandardMaterial 
+                color="#ff0000" 
+                emissive="#ff0000"
+                emissiveIntensity={0.5}
+              />
+            </mesh>
+            <Text
+              position={[0, 3, 0]}
+              fontSize={0.5}
+              color="#ffffff"
+              anchorX="center"
+              anchorY="middle"
+            >
+              DEBUG: No vehicles found!
+            </Text>
+          </group>
+        )}
         
         {/* Demo Objects when not connected */}
         {!isConnected && (
@@ -856,7 +1277,7 @@ function Scene3D() {
             </Text>
             
             <Text
-              position={[0, 3.5, 0]}
+              position={[0, 3, 0]}
               fontSize={0.5}
               color="#ffffff"
               anchorX="center"
@@ -869,6 +1290,9 @@ function Scene3D() {
       </Canvas>
     </div>
   );
-}
+});
+
+// Log when Scene3D is exported
+console.log('[SCENE3D] Module loaded and Scene3D component defined');
 
 export default Scene3D;

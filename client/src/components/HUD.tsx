@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Card,
@@ -6,7 +6,6 @@ import {
   Typography,
   IconButton,
   Chip,
-  Avatar,
   Button,
   Tooltip,
   Badge,
@@ -17,10 +16,7 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
-  Divider,
   Stack,
-  Paper,
-  Fab
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -31,15 +27,12 @@ import {
   Map as MapIcon,
   Dashboard as DashboardIcon,
   AccountBalance as CreditsIcon,
-  LocalGasStation as FuelIcon,
   Diamond as OreIcon,
   Speed as SpeedIcon,
   Warning as WarningIcon,
   CheckCircle as SuccessIcon,
   Info as InfoIcon,
-  Close as CloseIcon,
   ExpandLess as ExpandLessIcon,
-  ExpandMore as ExpandMoreIcon,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
   VolumeUp as VolumeIcon,
@@ -106,7 +99,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
     >
       <CardContent sx={{ p: 2 }}>
         <Grid container spacing={2}>
-          <Grid xs={3}>
+          <Grid size={3}>
             <Box sx={{ textAlign: 'center' }}>
               <CreditsIcon sx={{ color: '#ffc107', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#ffc107', fontWeight: 600, fontSize: '1rem' }}>
@@ -118,7 +111,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Box sx={{ textAlign: 'center' }}>
               <OreIcon sx={{ color: '#4caf50', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#4caf50', fontWeight: 600, fontSize: '1rem' }}>
@@ -130,7 +123,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Box sx={{ textAlign: 'center' }}>
               <FleetIcon sx={{ color: '#2196f3', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#2196f3', fontWeight: 600, fontSize: '1rem' }}>
@@ -142,7 +135,7 @@ function QuickStats({ credits, totalOre, activeVehicles, totalVehicles }: QuickS
             </Box>
           </Grid>
           
-          <Grid xs={3}>
+          <Grid size={3}>
             <Box sx={{ textAlign: 'center' }}>
               <SpeedIcon sx={{ color: '#9c27b0', mb: 0.5 }} />
               <Typography variant="h6" sx={{ color: '#9c27b0', fontWeight: 600, fontSize: '1rem' }}>
@@ -273,7 +266,7 @@ interface HUDProps {
 }
 
 function HUD({ onOpenFleet, onOpenGarage, onOpenMap }: HUDProps) {
-  const { gameState, isConnected, connectionStatus } = useGameStore();
+  const { isConnected } = useGameStore();
   const [notifications, setNotifications] = useState<NotificationItem[]>(mockNotifications);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isMenuExpanded, setIsMenuExpanded] = useState(false);
@@ -340,14 +333,14 @@ function HUD({ onOpenFleet, onOpenGarage, onOpenMap }: HUDProps) {
       <Box sx={{ position: 'absolute', top: 16, left: 16, right: 16, pointerEvents: 'auto' }}>
         <Grid container spacing={2} alignItems="flex-start">
           {/* Left Side - Quick Stats */}
-          <Grid item xs={8}>
+          <Grid size={8}>
             <Collapse in={showQuickStats}>
               <QuickStats {...gameStats} />
             </Collapse>
           </Grid>
 
           {/* Right Side - Controls */}
-          <Grid item xs={4}>
+          <Grid size={4}>
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
               {/* Connection Status */}
               <Tooltip title={`Server ${connStatus.text}`}>

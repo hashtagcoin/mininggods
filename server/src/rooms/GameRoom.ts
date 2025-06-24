@@ -223,6 +223,8 @@ export class GameRoom extends Room<GameState> {
     
     this.state.vehicles.set(vehicleId, vehicle);
     console.log(`🚛 Created vehicle ${name} (${type}) for player ${playerId}`);
+    console.log(`   Position: x=${vehicle.x.toFixed(2)}, y=${vehicle.y}, z=${vehicle.z.toFixed(2)}`);
+    console.log(`   Total vehicles: ${this.state.vehicles.size}`);
     
     return vehicleId;
   }
@@ -241,10 +243,18 @@ export class GameRoom extends Room<GameState> {
   private handleVehicleMove(playerId: string, data: any) {
     const vehicle = this.state.vehicles.get(data.vehicleId);
     if (vehicle && vehicle.ownerId === playerId) {
+      console.log(`🚗 Moving vehicle ${vehicle.name} to (${data.x.toFixed(2)}, ${data.z.toFixed(2)})`);
       vehicle.x = data.x;
       vehicle.z = data.z;
       vehicle.y = 0; // Always keep vehicles on ground level
       vehicle.status = "moving";
+      
+      // Set idle after a delay (simplified - in real game would check actual movement)
+      setTimeout(() => {
+        if (vehicle.status === "moving") {
+          vehicle.status = "idle";
+        }
+      }, 2000);
     }
   }
 

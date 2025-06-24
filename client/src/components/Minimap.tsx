@@ -1,152 +1,238 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Box, Paper, Typography, IconButton, Chip } from '@mui/material';
-import { styled } from '@mui/material/styles';
-import { Close, ZoomIn, ZoomOut } from '@mui/icons-material';
+import React, { useRef, useMemo, useCallback } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { Box, Card, styled, IconButton, Typography } from '@mui/material';
+import { Add as ZoomInIcon, Remove as ZoomOutIcon } from '@mui/icons-material';
+import { Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { useGameStore } from '../store/gameStore';
+import type { Player, Vehicle } from '../services/GameClient';
+import { 
+  useGameState, 
+  useMyPlayerId, 
+  useSelectedVehicleId, 
+  useVehicleActions,
+  usePlayerActions
+} from '../store/gameStore';
+import { CanvasErrorBoundary } from './ErrorBoundary';
+
+// Type for the actual game state structure used in the app
+interface AppGameState {
+  players: Record<string, Player>;
+  vehicles: Record<string, Vehicle>;
+  oreNodes: Record<string, any>;
+  worldSeed?: number;
+  tick: number;
+}
 
 // Styled components for consistent UI
-const MinimapContainer = styled(Paper)(({ theme }) => ({
+const MinimapContainer = styled(Card)(() => ({
   position: 'fixed',
   top: 20,
   right: 20,
-  width: 300,
-  height: 300,
-  zIndex: 1000,
-  borderRadius: 12,
-  overflow: 'hidden',
-  background: 'rgba(0, 0, 0, 0.85)',
+  width: 350,
+  height: 400,
+  backgroundColor: 'rgba(0, 0, 0, 0.9)',
   backdropFilter: 'blur(10px)',
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+  border: '2px solid rgba(255, 255, 255, 0.2)',
+  borderRadius: '12px',
+  overflow: 'hidden',
+  zIndex: 1000,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
 }));
 
-const MinimapHeader = styled(Box)(({ theme }) => ({
+const MinimapHeader = styled(Box)(() => ({
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  padding: theme.spacing(1, 2),
+  padding: '8px 16px',
   background: 'rgba(255, 255, 255, 0.05)',
   borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
 }));
 
-const MinimapCanvas = styled(Box)({
-  width: '100%',
-  height: 'calc(100% - 48px)',
+const MinimapCanvas = styled(Box)(() => ({
+  height: '280px',
   position: 'relative',
-});
+  overflow: 'hidden',
+  background: 'radial-gradient(ellipse at center, rgba(20, 20, 40, 0.8) 0%, rgba(10, 10, 20, 0.95) 100%)',
+}));
 
-const ControlsOverlay = styled(Box)({
-  position: 'absolute',
-  bottom: 8,
-  right: 8,
+const MinimapControls = styled(Box)(() => ({
   display: 'flex',
-  gap: 4,
-  zIndex: 1001,
-});
+  justifyContent: 'center',
+  alignItems: 'center',
+  padding: '8px',
+  background: 'rgba(255, 255, 255, 0.05)',
+  borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+}));
 
 // Minimap Vehicle Component
-function MinimapVehicle({ 
+const MinimapVehicle = React.memo(({ 
   vehicle, 
-  isSelected = false,
+  isSelected = false, 
   worldBounds,
   onClick 
 }: { 
-  vehicle: { id: string; name: string; x: number; y: number; z: number; type: string; status: string },
+  vehicle: Vehicle,
   isSelected?: boolean,
   worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number },
   onClick: (vehicleId: string) => void
-}) {
+}) => {
   const meshRef = useRef<THREE.Mesh>(null);
   
-  // Convert world coordinates to minimap coordinates (-1 to 1)
-  const minimapX = ((vehicle.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX)) * 2 - 1;
-  const minimapZ = ((vehicle.z - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ)) * 2 - 1;
-  
-  // Vehicle type colors
-  const getVehicleColor = (type: string) => {
-    switch ((type || '').toLowerCase()) {
-      case 'miner': return '#ff6b35';
-      case 'hauler': return '#4a90e2';
-      case 'scout': return '#9b59b6';
-      default: return '#ffffff';
-    }
-  };
+  // Get vehicle position with optimistic updates
+  const vehiclePosition = useMemo(() => {
+    return { x: vehicle.x || 0, y: vehicle.y || 0, z: vehicle.z || 0 };
+  }, [vehicle.x, vehicle.y, vehicle.z]);
 
-  const handleClick = (event: THREE.Event) => {
+  // Convert world position to minimap coordinates
+  const minimapPosition = useMemo(() => {
+    const normalizedX = (vehiclePosition.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX);
+    const normalizedZ = (vehiclePosition.z - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ);
+    
+    const mapX = (normalizedX - 0.5) * 9;
+    const mapZ = (normalizedZ - 0.5) * 9;
+    
+    console.log(`[Minimap Vehicle ${vehicle.id}] World pos: (${vehiclePosition.x}, ${vehiclePosition.z}) -> Minimap pos: (${mapX}, ${mapZ})`);
+    
+    return [mapX, 0.2, mapZ] as [number, number, number];
+  }, [vehiclePosition, worldBounds, vehicle.id]);
+
+  const handleClick = useCallback((event: any) => {
     event.stopPropagation();
     onClick(vehicle.id);
+  }, [onClick, vehicle.id]);
+
+  // Get color based on vehicle type
+  const getVehicleColor = (type: string) => {
+    switch (type) {
+      case 'miner': return '#ff6b35';
+      case 'hauler': return '#4dabf7';
+      case 'scout': return '#ae3ec9';
+      default: return '#69db7c';
+    }
   };
 
-  // Animate selection ring
-  useFrame((state) => {
-    if (meshRef.current && isSelected) {
-      meshRef.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 4) * 0.1);
-    } else if (meshRef.current) {
-      meshRef.current.scale.setScalar(1);
+  // Get vehicle shape based on type
+  const getVehicleGeometry = (type: string) => {
+    switch (type) {
+      case 'miner':
+        return <boxGeometry args={[0.6, 0.3, 0.6]} />; // Square for miners
+      case 'hauler':
+        return <cylinderGeometry args={[0.4, 0.4, 0.3, 6]} />; // Hexagon for haulers
+      case 'scout':
+        return <coneGeometry args={[0.4, 0.4, 4]} />; // Diamond for scouts
+      default:
+        return <sphereGeometry args={[0.4, 8, 8]} />; // Sphere for others
     }
-  });
+  };
 
   return (
-    <group position={[minimapX * 4.5, 0, minimapZ * 4.5]}>
-      {/* Vehicle dot */}
+    <group position={minimapPosition}>
+      {/* Glow effect for better visibility */}
+      <mesh position={[0, 0, 0]}>
+        <sphereGeometry args={[0.8, 16, 16]} />
+        <meshBasicMaterial 
+          color={getVehicleColor(vehicle.type)} 
+          transparent 
+          opacity={0.2} 
+        />
+      </mesh>
+      
+      {/* Main vehicle shape */}
       <mesh 
         ref={meshRef}
         onClick={handleClick}
         onPointerOver={() => document.body.style.cursor = 'pointer'}
         onPointerOut={() => document.body.style.cursor = 'default'}
       >
-        <circleGeometry args={[isSelected ? 0.15 : 0.1, 8]} />
-        <meshBasicMaterial 
-          color={getVehicleColor(vehicle.type)}
-          transparent
-          opacity={isSelected ? 1 : 0.8}
+        {getVehicleGeometry(vehicle.type)}
+        <meshStandardMaterial 
+          color={getVehicleColor(vehicle.type)} 
+          emissive={getVehicleColor(vehicle.type)}
+          emissiveIntensity={isSelected ? 0.8 : 0.4}
+          metalness={0.8}
+          roughness={0.2}
         />
       </mesh>
       
-      {/* Selection ring */}
+      {/* Selection indicator - pulsing ring */}
       {isSelected && (
-        <mesh>
-          <ringGeometry args={[0.2, 0.25, 16]} />
-          <meshBasicMaterial 
-            color="#ffffff"
-            transparent
-            opacity={0.6}
-          />
+        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.6, 0.8, 32]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.9} />
         </mesh>
       )}
+      
+      {/* Status indicator - larger and clearer */}
+      <mesh position={[0.4, 0.4, 0]}>
+        <sphereGeometry args={[0.15, 16, 16]} />
+        <meshBasicMaterial 
+          color={vehicle.status === 'active' ? '#00ff00' : '#ffaa00'} 
+        />
+      </mesh>
+      
+      {/* Vehicle name label */}
+      <Text
+        position={[0, 0.8, 0]}
+        fontSize={0.25}
+        color="#ffffff"
+        anchorX="center"
+        anchorY="middle"
+        strokeWidth={'2%'}
+        strokeColor="#000000"
+        outlineWidth={0.1}
+        outlineColor="#000000"
+      >
+        {vehicle.name}
+      </Text>
     </group>
   );
-}
+});
 
 // Minimap Player Component
-function MinimapPlayer({ 
+const MinimapPlayer = React.memo(({ 
   player, 
   isMe = false,
   worldBounds 
 }: { 
-  player: { id: string; name: string; x: number; y: number; credits: number },
+  player: Player,
   isMe?: boolean,
   worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number }
-}) {
-  // Convert world coordinates to minimap coordinates
-  const minimapX = ((player.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX)) * 2 - 1;
-  const minimapZ = ((0 - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ)) * 2 - 1; // Player Z is 0
+}) => {
+  // Convert world position to minimap coordinates
+  const minimapPosition = useMemo(() => {
+    const normalizedX = (player.x - worldBounds.minX) / (worldBounds.maxX - worldBounds.minX);
+    const normalizedZ = (0 - worldBounds.minZ) / (worldBounds.maxZ - worldBounds.minZ); // Players are at z=0
+    
+    return [
+      (normalizedX - 0.5) * 9,
+      0.1,
+      (normalizedZ - 0.5) * 9
+    ] as [number, number, number];
+  }, [player.x, worldBounds]);
 
   return (
-    <group position={[minimapX * 4.5, 0, minimapZ * 4.5]}>
+    <group position={minimapPosition}>
       <mesh>
-        <boxGeometry args={[isMe ? 0.2 : 0.15, 0.1, isMe ? 0.2 : 0.15]} />
+        <cylinderGeometry args={[0.15, 0.15, 0.3, 8]} />
+        <meshStandardMaterial 
+          color={isMe ? '#00ff00' : '#0099ff'} 
+          emissive={isMe ? '#004400' : '#000044'}
+          emissiveIntensity={0.2}
+        />
+      </mesh>
+      
+      {/* Player indicator ring */}
+      <mesh position={[0, 0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.18, 0.25, 16]} />
         <meshBasicMaterial 
-          color={isMe ? '#ff6b35' : '#4CAF50'}
-          transparent
-          opacity={0.9}
+          color={isMe ? '#00ff00' : '#0099ff'} 
+          transparent 
+          opacity={0.6} 
         />
       </mesh>
     </group>
   );
-}
+});
 
 // Interactive Minimap Ground
 function MinimapGround({ 
@@ -156,182 +242,271 @@ function MinimapGround({
   worldBounds: { minX: number; maxX: number; minZ: number; maxZ: number },
   onGroundClick: (x: number, z: number) => void
 }) {
-  const handleClick = (event: THREE.Event) => {
-    if (event.point) {
-      // Convert minimap coordinates back to world coordinates
-      const worldX = ((event.point.x / 4.5 + 1) / 2) * (worldBounds.maxX - worldBounds.minX) + worldBounds.minX;
-      const worldZ = ((event.point.z / 4.5 + 1) / 2) * (worldBounds.maxZ - worldBounds.minZ) + worldBounds.minZ;
-      onGroundClick(worldX, worldZ);
-    }
-  };
+  const handleClick = useCallback((event: any) => {
+    event.stopPropagation();
+    // Convert minimap coordinates back to world coordinates
+    const worldX = ((event.point.x / 4.5 + 1) / 2) * (worldBounds.maxX - worldBounds.minX) + worldBounds.minX;
+    const worldZ = ((event.point.z / 4.5 + 1) / 2) * (worldBounds.maxZ - worldBounds.minZ) + worldBounds.minZ;
+    onGroundClick(worldX, worldZ);
+  }, [worldBounds, onGroundClick]);
 
   return (
-    <mesh 
-      rotation={[-Math.PI / 2, 0, 0]} 
-      position={[0, -0.1, 0]}
-      onClick={handleClick}
-    >
-      <planeGeometry args={[10, 10]} />
-      <meshBasicMaterial 
-        color="#1a1a1a"
-        transparent
-        opacity={0.3}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
+    <>
+      {/* Grid lines for better spatial reference */}
+      <gridHelper args={[9, 9, '#333344', '#222233']} position={[0, 0, 0]} />
+      
+      {/* Ground plane */}
+      <mesh 
+        rotation={[-Math.PI / 2, 0, 0]} 
+        position={[0, -0.1, 0]}
+        onClick={handleClick}
+        receiveShadow
+      >
+        <planeGeometry args={[9, 9]} />
+        <meshStandardMaterial 
+          color="#0a0a14" 
+          transparent 
+          opacity={0.5}
+          metalness={0.1}
+          roughness={0.9}
+        />
+      </mesh>
+    </>
   );
 }
 
 // Main Minimap Scene
-function MinimapScene() {
-  const { gameState, myPlayerId, selectedVehicleId, selectVehicle, moveVehicle, movePlayer } = useGameStore();
+const MinimapScene = React.memo(() => {
+  const gameState = useGameState() as AppGameState | null;
+  const myPlayerId = useMyPlayerId();
+  const selectedVehicleId = useSelectedVehicleId();
+  const { moveVehicle, selectVehicle } = useVehicleActions();
+  const { movePlayer } = usePlayerActions();
   
   if (!gameState) return null;
 
-  // Calculate world bounds from all entities
-  const allPositions = [
-    ...Object.values(gameState.players).map(p => ({ x: p.x, z: 0 })),
-    ...Object.values(gameState.vehicles || {}).map(v => ({ x: v.x, z: v.z }))
-  ];
+  // Calculate world bounds from all entities - memoized
+  const { worldBounds } = useMemo(() => {
+    const positions: Array<{ x: number; z: number }> = [];
+    
+    // Safe iteration over players
+    if (gameState.players) {
+      Object.values(gameState.players).forEach((player: Player) => {
+        positions.push({ x: player.x, z: 0 });
+      });
+    }
+    
+    // Safe iteration over vehicles
+    if (gameState.vehicles) {
+      if (gameState.vehicles.forEach) {
+        // Handle MapSchema
+        gameState.vehicles.forEach((vehicle: Vehicle) => {
+          positions.push({ x: vehicle.x || 0, z: vehicle.z || 0 });
+        });
+      } else {
+        // Fallback to Object.values
+        Object.values(gameState.vehicles).forEach((vehicle: Vehicle) => {
+          positions.push({ x: vehicle.x || 0, z: vehicle.z || 0 });
+        });
+      }
+    }
 
-  const worldBounds = {
-    minX: Math.min(...allPositions.map(p => p.x)) - 10,
-    maxX: Math.max(...allPositions.map(p => p.x)) + 10,
-    minZ: Math.min(...allPositions.map(p => p.z)) - 10,
-    maxZ: Math.max(...allPositions.map(p => p.z)) + 10,
-  };
+    // Ensure we have at least some positions for bounds calculation
+    if (positions.length === 0) {
+      positions.push({ x: 0, z: 0 });
+    }
 
-  const handleVehicleClick = (vehicleId: string) => {
-    selectVehicle(selectedVehicleId === vehicleId ? null : vehicleId);
-  };
+    // Calculate bounds with dynamic padding based on entity spread
+    const minX = Math.min(...positions.map(p => p.x));
+    const maxX = Math.max(...positions.map(p => p.x));
+    const minZ = Math.min(...positions.map(p => p.z));
+    const maxZ = Math.max(...positions.map(p => p.z));
+    
+    // Add 20% padding or minimum 20 units
+    const xRange = maxX - minX;
+    const zRange = maxZ - minZ;
+    const xPadding = Math.max(20, xRange * 0.2);
+    const zPadding = Math.max(20, zRange * 0.2);
 
-  const handleGroundClick = (x: number, z: number) => {
+    const bounds = {
+      minX: minX - xPadding,
+      maxX: maxX + xPadding,
+      minZ: minZ - zPadding,
+      maxZ: maxZ + zPadding
+    };
+
+    return { worldBounds: bounds };
+  }, [gameState.players, gameState.vehicles]);
+
+  const handleGroundClick = useCallback((x: number, z: number) => {
     if (selectedVehicleId) {
-      // Move selected vehicle (Y=0 for ground level, Z for forward/back movement)
       moveVehicle(selectedVehicleId, x, 0, z);
     } else {
-      // Move player (Y=0 for ground level, Z for forward/back movement)
       movePlayer(x, 0, z);
     }
-  };
+  }, [selectedVehicleId, moveVehicle, movePlayer]);
+
+  const handleVehicleClick = useCallback((vehicleId: string) => {
+    selectVehicle(vehicleId === selectedVehicleId ? null : vehicleId);
+  }, [selectVehicle, selectedVehicleId]);
 
   return (
     <>
       {/* Ground plane */}
       <MinimapGround 
-        worldBounds={worldBounds}
+        worldBounds={worldBounds} 
         onGroundClick={handleGroundClick}
       />
-      
-      {/* Grid lines */}
-      <gridHelper args={[10, 20, '#333333', '#333333']} position={[0, 0, 0]} />
-      
-      {/* Players */}
-      {Object.entries(gameState.players).map(([playerKey, player], index) => (
+
+      {/* Render players */}
+      {gameState.players && Object.entries(gameState.players).map(([playerId, player]) => (
         <MinimapPlayer
-          key={`player-${player.id || playerKey || index}`}
+          key={playerId}
           player={player}
-          isMe={player.id === myPlayerId}
+          isMe={playerId === myPlayerId}
           worldBounds={worldBounds}
         />
       ))}
-      
-      {/* Vehicles */}
-      {gameState.vehicles && Object.entries(gameState.vehicles).map(([vehicleKey, vehicle], index) => (
-        <MinimapVehicle
-          key={`vehicle-${vehicle.id || vehicleKey || index}`}
-          vehicle={vehicle}
-          isSelected={vehicle.id === selectedVehicleId}
-          worldBounds={worldBounds}
-          onClick={handleVehicleClick}
-        />
-      ))}
+
+      {/* Render vehicles */}
+      {gameState.vehicles && (() => {
+        const vehicleEntries = [];
+        // Handle MapSchema properly
+        if (gameState.vehicles.forEach) {
+          gameState.vehicles.forEach((vehicle: Vehicle, vehicleId: string) => {
+            vehicleEntries.push(
+              <MinimapVehicle
+                key={vehicleId}
+                vehicle={vehicle}
+                isSelected={vehicleId === selectedVehicleId}
+                worldBounds={worldBounds}
+                onClick={handleVehicleClick}
+              />
+            );
+          });
+        } else {
+          // Fallback to Object.entries
+          Object.entries(gameState.vehicles).forEach(([vehicleId, vehicle]) => {
+            vehicleEntries.push(
+              <MinimapVehicle
+                key={vehicleId}
+                vehicle={vehicle as Vehicle}
+                isSelected={vehicleId === selectedVehicleId}
+                worldBounds={worldBounds}
+                onClick={handleVehicleClick}
+              />
+            );
+          });
+        }
+        return vehicleEntries;
+      })()}
     </>
   );
-}
+});
 
 // Main Minimap Component
 interface MinimapProps {
-  isVisible: boolean;
+  isVisible?: boolean;
   onClose?: () => void;
 }
 
-export default function Minimap({ isVisible = true, onClose }: MinimapProps) {
-  const [zoom, setZoom] = useState(1);
-  const { gameState, selectedVehicleId } = useGameStore();
+const Minimap: React.FC<MinimapProps> = ({ isVisible = true, onClose }) => {
+  const [zoom, setZoom] = React.useState(1);
+  const gameState = useGameState() as AppGameState | null;
+  const selectedVehicleId = useSelectedVehicleId();
+  
+  const selectedVehicle = useMemo(() => {
+    if (!selectedVehicleId || !gameState?.vehicles) return null;
+    return gameState.vehicles[selectedVehicleId] || null;
+  }, [selectedVehicleId, gameState?.vehicles]);
 
   if (!isVisible || !gameState) return null;
-
-  const selectedVehicle = selectedVehicleId && gameState.vehicles ? 
-    gameState.vehicles[selectedVehicleId] : null;
 
   return (
     <MinimapContainer>
       <MinimapHeader>
-        <Typography variant="subtitle2" sx={{ color: '#ffffff', fontWeight: 600 }}>
-          Tactical Map
-        </Typography>
+        <Box>
+          <Typography variant="h6" color="primary">
+            Tactical Map
+          </Typography>
+        </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {selectedVehicle && (
-            <Chip
-              label={`${selectedVehicle.name} Selected`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(255, 107, 53, 0.2)',
-                color: '#ff6b35',
-                border: '1px solid rgba(255, 107, 53, 0.3)',
-                fontSize: '0.75rem'
-              }}
-            />
+            <Box>
+              <Typography variant="body1" color="primary">
+                {selectedVehicle.name}
+              </Typography>
+            </Box>
           )}
           {onClose && (
-            <IconButton size="small" onClick={onClose} sx={{ color: '#ffffff' }}>
-              <Close fontSize="small" />
+            <IconButton size="small" onClick={onClose} sx={{ color: 'grey.400' }}>
+              <ZoomOutIcon />
             </IconButton>
           )}
         </Box>
       </MinimapHeader>
-      
+
       <MinimapCanvas>
-        <Canvas
-          camera={{ 
-            position: [0, 15, 0], 
-            rotation: [-Math.PI / 2, 0, 0],
-            zoom: zoom,
-            far: 1000
-          }}
-          orthographic
-        >
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[10, 10, 5]} intensity={0.4} />
-          <MinimapScene />
-        </Canvas>
-        
-        <ControlsOverlay>
-          <IconButton
-            size="small"
-            onClick={() => setZoom(Math.min(zoom * 1.2, 3))}
-            sx={{ 
-              backgroundColor: 'rgba(255, 255, 255, 0.1)',
-              color: '#ffffff',
-              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.2)' }
+        <CanvasErrorBoundary>
+          <Canvas
+            camera={{ 
+              position: [0, 10 / zoom, 0], 
+              fov: 50,
+              near: 0.1,
+              far: 1000
             }}
+            style={{ background: 'transparent' }}
           >
-            <ZoomIn fontSize="small" />
-          </IconButton>
-          <IconButton
-            size="small"
-            onClick={() => setZoom(Math.max(zoom / 1.2, 0.5))}
-            sx={{ 
-              backgroundColor: 'rgba(255, 255, 255, 0.1)',
-              color: '#ffffff',
-              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.2)' }
-            }}
-          >
-            <ZoomOut fontSize="small" />
-          </IconButton>
-        </ControlsOverlay>
+            <ambientLight intensity={0.6} />
+            <directionalLight position={[10, 10, 5]} intensity={0.8} />
+            
+            <MinimapScene />
+          </Canvas>
+        </CanvasErrorBoundary>
       </MinimapCanvas>
+
+      <MinimapControls>
+        <Box sx={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', px: 1 }}>
+          {/* Zoom controls */}
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <IconButton 
+              size="small" 
+              onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}
+              sx={{ color: 'grey.400' }}
+            >
+              <ZoomOutIcon />
+            </IconButton>
+            <Typography variant="body2" sx={{ mx: 1, color: 'grey.400' }}>
+              {Math.round(zoom * 100)}%
+            </Typography>
+            <IconButton 
+              size="small" 
+              onClick={() => setZoom(Math.min(3, zoom + 0.1))}
+              sx={{ color: 'grey.400' }}
+            >
+              <ZoomInIcon />
+            </IconButton>
+          </Box>
+          
+          {/* Vehicle Legend */}
+          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Box sx={{ width: 12, height: 12, bgcolor: '#ff6b35', borderRadius: 0 }} />
+              <Typography variant="caption" sx={{ color: 'grey.400' }}>Miner</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Box sx={{ width: 12, height: 12, bgcolor: '#4dabf7', borderRadius: '50%' }} />
+              <Typography variant="caption" sx={{ color: 'grey.400' }}>Hauler</Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Box sx={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: '12px solid #ae3ec9' }} />
+              <Typography variant="caption" sx={{ color: 'grey.400' }}>Scout</Typography>
+            </Box>
+          </Box>
+        </Box>
+      </MinimapControls>
     </MinimapContainer>
   );
-}
+};
+
+export default Minimap;
