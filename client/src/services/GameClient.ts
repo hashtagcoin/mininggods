@@ -22,9 +22,12 @@ export interface Vehicle {
   x: number;
   y: number;
   z: number;
+  rotation?: number;
   type: string;
   status: string;
   ownerId?: string;
+  isAI?: boolean;
+  targetRotation?: number;
 }
 
 export interface OreNode {

@@ -185,15 +185,45 @@ export const useGameStore = create<GameStore>(logger((set, get) => ({
 
   // Move a vehicle
   moveVehicle: (vehicleId: string, x: number, y: number, z: number) => {
+    console.log(`[STORE] moveVehicle called:`, { vehicleId, x, y, z });
     const { gameState, gameClient } = get();
-    if (!gameClient || !gameState?.vehicles?.[vehicleId]) return;
     
+    if (!gameClient) {
+      console.error('[STORE] No game client available');
+      return;
+    }
+    
+    // Check if vehicles exist and try to find the vehicle
+    let vehicleFound = false;
+    if (gameState?.vehicles) {
+      // Try direct access first
+      if (gameState.vehicles[vehicleId]) {
+        vehicleFound = true;
+      } else if (gameState.vehicles.get && gameState.vehicles.get(vehicleId)) {
+        // Try MapSchema get method
+        vehicleFound = true;
+      } else {
+        // Try iterating
+        gameState.vehicles.forEach((vehicle: any, id: string) => {
+          if (id === vehicleId) vehicleFound = true;
+        });
+      }
+    }
+    
+    if (!vehicleFound) {
+      console.error(`[STORE] Vehicle ${vehicleId} not found in state`);
+      console.log('[STORE] Available vehicles:', gameState?.vehicles);
+      return;
+    }
+    
+    console.log(`[STORE] Adding optimistic update for vehicle ${vehicleId}`);
     // Add optimistic update
     const currentState = get();
     set({
       optimisticVehiclePositions: { ...currentState.optimisticVehiclePositions, [vehicleId]: { x, z } }
     });
     
+    console.log(`[STORE] Sending move command to server`);
     // Send to server with debouncing
     gameClient.moveVehicle(vehicleId, x, y, z);
   },

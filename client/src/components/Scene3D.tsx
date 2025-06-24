@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Text, useGLTF, Grid } from '@react-three/drei';
+import { OrbitControls, Text, useGLTF, Grid, Environment, useTexture, Stars } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Player, Vehicle } from '../services/GameClient';
 import { 
@@ -17,9 +17,9 @@ import { loopDetector } from '../utils/infiniteLoopDetector';
 
 // Define the app-specific game state interface
 interface AppGameState {
-  players: Record<string, Player>;
-  vehicles: Record<string, Vehicle>;
-  oreNodes?: Record<string, any>;
+  players: Record<string, Player> | any; // MapSchema or plain object
+  vehicles: Record<string, Vehicle> | any; // MapSchema or plain object
+  oreNodes?: Record<string, { id: string; x: number; y: number; z: number; remaining: number; type: string }> | any; // MapSchema or plain object
 }
 
 // Player Avatar Component
@@ -75,39 +75,117 @@ const PlayerAvatar = React.memo(({
   );
 });
 
-// Terrain Component - More mountainous terrain
-function Terrain() {
+// Terrain Component - Lunar surface with PBR materials
+function Terrain({ onClick }: { onClick?: (event: ThreeEvent<MouseEvent>) => void }) {
   const meshRef = useRef<THREE.Mesh>(null);
   
   console.log('[Terrain] Component rendering');
   
-  // Terrain parameters - more mountainous
-  const worldWidth = 128;
-  const worldDepth = 128;
+  // Terrain parameters - lunar surface
+  const worldWidth = 256; // Increased resolution for better bump mapping
+  const worldDepth = 256;
   const terrainSize = 200; // Physical size of terrain
   
-  // Generate height data using enhanced noise for more mountains
+  // Load PBR textures
+  const textureLoader = new THREE.TextureLoader();
+  const textures = useMemo(() => {
+    console.log('[Terrain] Loading PBR textures...');
+    
+    // Load all PBR textures with error handling
+    const diffuseMap = textureLoader.load(
+      '/textures/aerial_rocks_01_diff_4k.jpg',
+      undefined,
+      undefined,
+      (err) => console.error('[Terrain] Failed to load diffuse map:', err)
+    );
+    
+    const roughnessMap = textureLoader.load(
+      '/textures/aerial_rocks_01_rough_4k.jpg',
+      undefined,
+      undefined,
+      (err) => console.error('[Terrain] Failed to load roughness map:', err)
+    );
+    
+    const displacementMap = textureLoader.load(
+      '/textures/aerial_rocks_01_disp_4k.png',
+      undefined,
+      undefined,
+      (err) => console.error('[Terrain] Failed to load displacement map:', err)
+    );
+    
+    // Create normal map from displacement map
+    const normalMap = useMemo(() => {
+      // Create a canvas to generate normal map from displacement
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+      
+      // For now, use displacement map directly
+      // In production, you'd convert displacement to normal map
+      return displacementMap;
+    }, [displacementMap]);
+    
+    // Configure textures for seamless tiling
+    [diffuseMap, roughnessMap, displacementMap, normalMap].forEach(texture => {
+      if (texture) {
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(12, 12); // More tiling for detailed terrain
+        texture.anisotropy = 16; // Better texture filtering at angles
+        // Enable mipmapping for better performance at distance
+        texture.generateMipmaps = true;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+      }
+    });
+    
+    console.log('[Terrain] Textures configured');
+    return { diffuseMap, normalMap, roughnessMap, displacementMap };
+  }, []);
+  
+  // Generate height data using enhanced noise for lunar craters and mountains
   const generateHeightData = (width: number, height: number) => {
     console.log('[Terrain] Generating height data - width:', width, 'height:', height);
     const size = width * height;
     const data = new Float32Array(size);
     
-    // Enhanced noise function with multiple octaves for mountainous terrain
+    // Enhanced noise function for lunar-like terrain
     const noise = (x: number, y: number) => {
-      // Multiple octaves for more complex mountainous terrain
-      const octave1 = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 1.0;  // Large hills
-      const octave2 = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.5;    // Medium hills
-      const octave3 = Math.sin(x * 0.2) * Math.cos(y * 0.2) * 0.25;   // Small details
+      // Multiple octaves for complex lunar terrain
+      const octave1 = Math.sin(x * 0.03) * Math.cos(y * 0.03) * 1.2;  // Large craters
+      const octave2 = Math.sin(x * 0.08) * Math.cos(y * 0.08) * 0.6;  // Medium features
+      const octave3 = Math.sin(x * 0.2) * Math.cos(y * 0.2) * 0.3;    // Small details
       const octave4 = Math.sin(x * 0.4) * Math.cos(y * 0.4) * 0.125;  // Fine details
       
       return octave1 + octave2 + octave3 + octave4;
     };
     
+    // Add crater function
+    const crater = (x: number, y: number, cx: number, cy: number, radius: number, depth: number) => {
+      const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+      if (dist < radius) {
+        const t = dist / radius;
+        return -depth * (1 - t * t); // Parabolic crater shape
+      }
+      return 0;
+    };
+    
     for (let i = 0; i < size; i++) {
       const x = i % width;
       const y = Math.floor(i / width);
-      // More dramatic height variations (max ~12 units high instead of 3)
-      data[i] = noise(x, y) * 6.0; // Much more mountainous
+      
+      // Base terrain noise
+      let height = noise(x, y) * 4.0;
+      
+      // Add several craters of different sizes
+      height += crater(x, y, 64, 64, 20, 8);    // Large crater
+      height += crater(x, y, 96, 32, 15, 6);    // Medium crater
+      height += crater(x, y, 32, 96, 12, 5);    // Medium crater
+      height += crater(x, y, 80, 80, 8, 3);     // Small crater
+      height += crater(x, y, 48, 48, 10, 4);    // Small crater
+      
+      data[i] = height;
     }
     
     console.log('[Terrain] Height data generated - sample values:', data[0], data[100], data[1000]);
@@ -193,48 +271,28 @@ function Terrain() {
     <mesh 
       ref={meshRef}
       receiveShadow
+      castShadow
       position={[0, 0, 0]}
+      onClick={onClick}
       onError={(error) => {
         console.error('[Terrain] Mesh rendering error:', error);
       }}
     >
       <primitive object={terrainGeometry} />
-      <meshLambertMaterial 
-        map={useMemo(() => {
-          console.log('[Terrain] Creating terrain texture');
-          try {
-            const canvas = document.createElement('canvas');
-            canvas.width = worldWidth;
-            canvas.height = worldDepth;
-            const context = canvas.getContext('2d')!;
-            
-            const imageData = context.createImageData(worldWidth, worldDepth);
-            const data = imageData.data;
-            
-            // Generate a simple dirt/rock texture
-            for (let i = 0; i < data.length; i += 4) {
-              const noise = Math.random() * 0.3 + 0.4; // Random variation
-              data[i] = Math.floor(101 * noise);     // R - brownish
-              data[i + 1] = Math.floor(67 * noise);  // G
-              data[i + 2] = Math.floor(33 * noise);  // B
-              data[i + 3] = 255;                     // A
-            }
-            
-            context.putImageData(imageData, 0, 0);
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(4, 4); // Tile the texture
-            
-            console.log('[Terrain] Texture created successfully');
-            return texture;
-          } catch (error) {
-            console.error('[Terrain] Error creating texture:', error);
-            throw error;
-          }
-        }, [])}
+      <meshStandardMaterial 
+        map={textures.diffuseMap}
+        normalMap={textures.normalMap}
+        normalScale={new THREE.Vector2(1.5, 1.5)}
+        roughnessMap={textures.roughnessMap}
+        roughness={0.9}
+        metalness={0.05}
+        bumpMap={textures.displacementMap}
+        bumpScale={0.5}
+        displacementMap={textures.displacementMap}
+        displacementScale={2}
         side={THREE.DoubleSide}
+        // Lunar surface color tint - slightly gray
+        color={new THREE.Color(0.8, 0.8, 0.82)}
       />
     </mesh>
   );
@@ -341,9 +399,15 @@ function Ore({
     console.warn('[Ore] Using fallback mesh as model failed to load');
     return (
       <group ref={groupRef} position={position} rotation={rotation}>
-        <mesh ref={meshRef} castShadow>
+        <mesh ref={meshRef} castShadow receiveShadow>
           <octahedronGeometry args={[1]} />
-          <meshLambertMaterial color="#8B4513" />
+          <meshStandardMaterial 
+            color="#8B4513" 
+            metalness={0.7}
+            roughness={0.3}
+            emissive="#442211"
+            emissiveIntensity={0.1}
+          />
         </mesh>
       </group>
     );
@@ -386,13 +450,53 @@ function Ore({
   );
 }
 
+// Radar Sweep Component for AI vehicles
+const RadarSweep = React.memo(() => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const mesh2Ref = useRef<THREE.Mesh>(null);
+  
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.z = state.clock.elapsedTime * 0.5;
+    }
+    if (mesh2Ref.current) {
+      mesh2Ref.current.rotation.z = state.clock.elapsedTime * 0.5;
+    }
+  });
+  
+  return (
+    <group position={[0, 0.5, 0]}>
+      <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0, 20, 32, 1, 0, Math.PI / 4]} />
+        <meshBasicMaterial 
+          color="#00ffff"
+          transparent
+          opacity={0.3}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh ref={mesh2Ref} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[15, 20, 32, 1, 0, Math.PI / 8]} />
+        <meshBasicMaterial 
+          color="#00ffff"
+          transparent
+          opacity={0.5}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
+  );
+});
+
 // Vehicle Component with Turn-Then-Move Logic
 const Vehicle = React.memo(({ 
   vehicle, 
-  isSelected = false 
+  isSelected = false,
+  isOwnedByPlayer = false
 }: { 
-  vehicle: { id: string; name: string; x: number; y: number; z: number; type: string; status: string }, 
-  isSelected?: boolean 
+  vehicle: { id: string; name: string; x: number; y: number; z: number; rotation?: number; type: string; status: string; isAI?: boolean; ownerId?: string }, 
+  isSelected?: boolean,
+  isOwnedByPlayer?: boolean
 }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
@@ -402,14 +506,101 @@ const Vehicle = React.memo(({
   const [hovered, setHovered] = useState(false);
   const [isVehicleMoving, setIsVehicleMoving] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
+  const [showBoundingBox] = useState(false); // Debug: show bounding box
+  const [forceUseBox] = useState(false); // Debug: force use box instead of model
+  const [manualOffset, setManualOffset] = useState(0); // Debug: manual offset adjustment
+  
+  // Debug: Keyboard controls for offset adjustment
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp') {
+        setManualOffset(prev => {
+          const newOffset = prev + 0.1;
+          console.log(`[Vehicle ${vehicle.id}] Manual offset increased to: ${newOffset.toFixed(2)}`);
+          return newOffset;
+        });
+      } else if (e.key === 'ArrowDown') {
+        setManualOffset(prev => {
+          const newOffset = prev - 0.1;
+          console.log(`[Vehicle ${vehicle.id}] Manual offset decreased to: ${newOffset.toFixed(2)}`);
+          return newOffset;
+        });
+      }
+    };
+    
+    if (isSelected) {
+      window.addEventListener('keydown', handleKeyPress);
+      return () => window.removeEventListener('keydown', handleKeyPress);
+    }
+  }, [isSelected, vehicle.id]);
   
   // Debug log vehicle data
-  console.log(`[Vehicle ${vehicle.id}] Rendering at:`, { x: vehicle.x, y: vehicle.y, z: vehicle.z, type: vehicle.type });
+  console.log(`[Vehicle ${vehicle.id}] Rendering at:`, { 
+    serverPos: { x: vehicle.x, y: vehicle.y, z: vehicle.z }, 
+    optimisticPos: optimisticPosition,
+    calculatedPos: { x: vehiclePosition.x, y: vehiclePosition.y, z: vehiclePosition.z },
+    isOwnedByPlayer,
+    type: vehicle.type 
+  });
   
   // Load GLB model from public directory
   // Note: useGLTF is a hook and must not be called conditionally
   const gltf = useGLTF('/miner2.glb');
   const scene = gltf?.scene;
+  
+  // Calculate vehicle height offset and adjust pivot point
+  const [vehicleHeightOffset, boundingBoxData, adjustedScene] = useMemo(() => {
+    if (scene) {
+      // Clone the scene to avoid modifying the original
+      const tempScene = scene.clone();
+      tempScene.scale.set(2, 2, 2); // Apply the same scale as we use for rendering
+      
+      // Calculate bounding box of the scaled model
+      const box = new THREE.Box3().setFromObject(tempScene);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      
+      // Calculate the bottom center point of the bounding box
+      const bottomCenterX = center.x;
+      const bottomCenterY = box.min.y;
+      const bottomCenterZ = center.z;
+      
+      // Create a new group to act as the adjusted pivot point
+      const pivotGroup = new THREE.Group();
+      
+      // Clone the original scene for our adjusted version
+      const adjustedModel = scene.clone();
+      adjustedModel.scale.set(2, 2, 2);
+      
+      // Move the model so its bottom center is at the origin
+      adjustedModel.position.set(-bottomCenterX, -bottomCenterY, -bottomCenterZ);
+      
+      // Add the adjusted model to the pivot group
+      pivotGroup.add(adjustedModel);
+      
+      console.log(`[Vehicle ${vehicle.id}] Model dimensions:`, {
+        width: size.x.toFixed(2),
+        height: size.y.toFixed(2),
+        depth: size.z.toFixed(2),
+        bottomY: box.min.y.toFixed(2),
+        centerY: center.y.toFixed(2),
+        adjustmentX: (-bottomCenterX).toFixed(2),
+        adjustmentY: (-bottomCenterY).toFixed(2),
+        adjustmentZ: (-bottomCenterZ).toFixed(2)
+      });
+      
+      // Now the pivot is at the bottom center, so no additional offset needed
+      return [0 + manualOffset, { size, min: box.min, max: box.max, center }, pivotGroup];
+    }
+    // Fallback for box geometry (height is 8)
+    // Box is centered at origin, so bottom is at -4
+    return [4 + manualOffset, { 
+      size: new THREE.Vector3(12, 8, 16), 
+      min: new THREE.Vector3(-6, -4, -8),
+      max: new THREE.Vector3(6, 4, 8),
+      center: new THREE.Vector3(0, 0, 0)
+    }, null];
+  }, [scene, vehicle.id, manualOffset]);
   
   // Get vehicle position with optimistic updates
   const vehiclePosition = useMemo(() => {
@@ -421,21 +612,26 @@ const Vehicle = React.memo(({
     const getHeight = (window as any).getTerrainHeight;
     if (getHeight) {
       const terrainHeight = getHeight(basePos.x, basePos.z);
-      basePos.y = terrainHeight + 0.07; // Small offset to keep vehicle above ground
+      basePos.y = terrainHeight + vehicleHeightOffset; // Use calculated offset
     }
     
     return basePos;
-  }, [vehicle.x, vehicle.y, vehicle.z, optimisticPosition]);
+  }, [vehicle.x, vehicle.y, vehicle.z, optimisticPosition, vehicleHeightOffset]);
   
   // Memoize vehicle color calculation
   const vehicleColor = useMemo(() => {
+    // AI miners have a different color scheme
+    if (vehicle.isAI) {
+      return '#00FF00'; // Bright green for AI miners
+    }
+    
     switch (vehicle.type) {
       case 'miner': return '#FF6B35';
       case 'hauler': return '#2196F3';
       case 'scout': return '#9C27B0';
       default: return '#757575';
     }
-  }, [vehicle.type]);
+  }, [vehicle.type, vehicle.isAI]);
   
   // Throttled position and rotation updates (reduced from every frame to ~20fps)
   const lastUpdateTime = useRef(0);
@@ -451,12 +647,30 @@ const Vehicle = React.memo(({
     const getHeight = (window as any).getTerrainHeight;
     if (getHeight) {
       const terrainHeight = getHeight(vehiclePosition.x, vehiclePosition.z);
-      currentPos.current.set(vehiclePosition.x, terrainHeight + 0.07, vehiclePosition.z);
+      currentPos.current.set(vehiclePosition.x, terrainHeight + vehicleHeightOffset, vehiclePosition.z);
+      console.log(`[Vehicle ${vehicle.id}] Initial position set:`, {
+        x: vehiclePosition.x,
+        y: terrainHeight + vehicleHeightOffset,
+        z: vehiclePosition.z,
+        vehicleHeightOffset
+      });
     }
-  }, []); // Only on mount
+    
+    // For AI vehicles, also initialize rotation
+    if (vehicle.isAI && vehicle.rotation !== undefined) {
+      currentRotation.current = vehicle.rotation;
+    }
+  }, []); // Only run once on mount
   
   // Update current position ref when vehicle position changes
   useEffect(() => {
+    console.log(`[Vehicle ${vehicle.id}] Position update triggered:`, {
+      old: { x: currentPos.current.x, z: currentPos.current.z },
+      new: { x: vehiclePosition.x, z: vehiclePosition.z },
+      hasOptimistic: !!optimisticPosition,
+      isOwnedByPlayer
+    });
+    
     const newTargetPos = new THREE.Vector3(vehiclePosition.x, vehiclePosition.y, vehiclePosition.z);
     const currentPosVec = new THREE.Vector3(currentPos.current.x, currentPos.current.y, currentPos.current.z);
     
@@ -465,15 +679,29 @@ const Vehicle = React.memo(({
     const dz = newTargetPos.z - currentPosVec.z;
     const distance = Math.sqrt(dx * dx + dz * dz);
     
-    if (distance > 0.1) { // Only move if distance is significant
+    console.log(`[Vehicle ${vehicle.id}] Movement calculation:`, {
+      dx, dz, distance,
+      willMove: distance > 0.1,
+      vehicleHeightOffset
+    });
+    
+    // For player vehicles with optimistic updates, always trigger movement
+    if (distance > 0.1 || (isOwnedByPlayer && optimisticPosition)) { // Move if distance is significant OR it's our vehicle with optimistic update
       isMoving.current = true;
       moveStartTime.current = Date.now();
       moveDistance.current = distance;
       
-      // Calculate target rotation (facing direction of movement)
-      targetRotation.current = Math.atan2(dx, dz);
+      // For AI vehicles, use server rotation
+      if (vehicle.isAI && vehicle.rotation !== undefined) {
+        targetRotation.current = vehicle.rotation;
+        currentRotation.current = vehicle.rotation;
+      } else {
+        // Calculate target rotation for player vehicles
+        targetRotation.current = Math.atan2(dx, dz);
+      }
+      console.log(`[Vehicle ${vehicle.id}] Starting movement, distance: ${distance}, optimistic: ${!!optimisticPosition}`);
     }
-  }, [vehiclePosition.x, vehiclePosition.y, vehiclePosition.z]);
+  }, [vehiclePosition.x, vehiclePosition.y, vehiclePosition.z, vehicle.id, vehicle.rotation, vehicle.isAI, optimisticPosition, isOwnedByPlayer]);
   
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -481,30 +709,80 @@ const Vehicle = React.memo(({
     const targetPos = new THREE.Vector3(vehiclePosition.x, vehiclePosition.y, vehiclePosition.z);
     
     // Update moving state for particles
-    setIsVehicleMoving(isMoving.current);
+    // For AI vehicles, check their status
+    if (vehicle.isAI) {
+      setIsVehicleMoving(vehicle.status === 'moving');
+    } else {
+      setIsVehicleMoving(isMoving.current);
+    }
     
-    if (isMoving.current) {
+    // For AI vehicles, always interpolate to server position
+    if (vehicle.isAI) {
+      const distance = currentPos.current.distanceTo(targetPos);
+      
+      // Only update if there's significant movement
+      if (distance > 0.1) {
+        const lerpFactor = 0.15; // Slightly faster for more responsive movement
+        currentPos.current.x = THREE.MathUtils.lerp(currentPos.current.x, targetPos.x, lerpFactor);
+        currentPos.current.z = THREE.MathUtils.lerp(currentPos.current.z, targetPos.z, lerpFactor);
+        
+        // Update terrain height at new position
+        const getHeight = (window as any).getTerrainHeight;
+        if (getHeight) {
+          currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + vehicleHeightOffset;
+        }
+      }
+    } else if (isMoving.current) {
+      // Debug movement
+      if (Math.random() < 0.02) { // Log occasionally to avoid spam
+        console.log(`[Vehicle ${vehicle.id}] Moving:`, {
+          currentPos: { x: currentPos.current.x, z: currentPos.current.z },
+          targetPos: { x: targetPos.x, z: targetPos.z },
+          distance: currentPos.current.distanceTo(targetPos)
+        });
+      }
+      
       // Realistic vehicle movement parameters
       const ROTATION_SPEED = 2.0; // radians per second
       const ACCELERATION = 3.0; // units per second squared
       const MAX_SPEED = 8.0; // units per second
       const DECELERATION = 5.0; // units per second squared
       
-      // First rotate towards target
-      const rotationDiff = targetRotation.current - currentRotation.current;
-      const normalizedDiff = ((rotationDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+      // For player vehicles, handle rotation
+      if (!vehicle.isAI) {
+        // First rotate towards target
+        const rotationDiff = targetRotation.current - currentRotation.current;
+        const normalizedDiff = ((rotationDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+        
+        if (Math.abs(normalizedDiff) > 0.05) {
+          // Still rotating
+          currentRotation.current += Math.sign(normalizedDiff) * Math.min(ROTATION_SPEED * delta, Math.abs(normalizedDiff));
+        } else {
+          // Rotation complete, now move
+          currentRotation.current = targetRotation.current;
+        }
+      }
       
-      if (Math.abs(normalizedDiff) > 0.05) {
-        // Still rotating
-        currentRotation.current += Math.sign(normalizedDiff) * Math.min(ROTATION_SPEED * delta, Math.abs(normalizedDiff));
-      } else {
-        // Rotation complete, now move
-        currentRotation.current = targetRotation.current;
-        
-        // Calculate current speed based on distance to target
-        const distanceToTarget = currentPos.current.distanceTo(targetPos);
-        const timeMoving = (Date.now() - moveStartTime.current) / 1000;
-        
+      // Movement logic for both AI and player vehicles
+      const distanceToTarget = currentPos.current.distanceTo(targetPos);
+      const timeMoving = (Date.now() - moveStartTime.current) / 1000;
+      
+      // Check if we should continue moving (player vehicles wait for rotation, AI vehicles move from server)
+      const rotationDiff = Math.abs(targetRotation.current - currentRotation.current);
+      const canMove = vehicle.isAI || (!vehicle.isAI && rotationDiff <= 0.05);
+      
+      if (Math.random() < 0.1 && !vehicle.isAI) { // Log player vehicles more frequently
+        console.log(`[Vehicle ${vehicle.id}] Movement state:`, {
+          isMoving: isMoving.current,
+          canMove,
+          rotationDiff,
+          distanceToTarget,
+          currentPos: { x: currentPos.current.x, z: currentPos.current.z },
+          targetPos: { x: targetPos.x, z: targetPos.z }
+        });
+      }
+      
+      if (canMove) {
         // Acceleration and deceleration phases
         let currentSpeed = 0;
         if (distanceToTarget > moveDistance.current * 0.3) {
@@ -524,7 +802,7 @@ const Vehicle = React.memo(({
           // Update terrain height at new position
           const getHeight = (window as any).getTerrainHeight;
           if (getHeight) {
-            currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + 0.07;
+            currentPos.current.y = getHeight(currentPos.current.x, currentPos.current.z) + vehicleHeightOffset;
           }
         } else {
           // Reached destination
@@ -534,9 +812,15 @@ const Vehicle = React.memo(({
       }
     }
     
-    // Apply position and rotation
+    // Apply position
     groupRef.current.position.copy(currentPos.current);
-    groupRef.current.rotation.y = currentRotation.current;
+    
+    // Apply rotation - for AI vehicles, use server rotation directly
+    if (vehicle.isAI && vehicle.rotation !== undefined) {
+      groupRef.current.rotation.y = vehicle.rotation;
+    } else {
+      groupRef.current.rotation.y = currentRotation.current;
+    }
     
     // Apply terrain angle rotation
     const getTerrainNormal = (window as any).getTerrainNormal;
@@ -559,10 +843,10 @@ const Vehicle = React.memo(({
       groupRef.current.position.y += bobAmount;
     }
     
-    // Animate arrow indicator
-    if (arrowRef.current) {
-      // Bounce animation - higher and more visible
-      arrowRef.current.position.y = 30 + Math.sin(state.clock.elapsedTime * 2) * 5;
+    // Animate arrow indicator (only if player owns the vehicle)
+    if (arrowRef.current && isOwnedByPlayer) {
+      // Bounce animation - closer to vehicle
+      arrowRef.current.position.y = 10 + Math.sin(state.clock.elapsedTime * 2) * 1;
       // Rotation animation
       arrowRef.current.rotation.y = state.clock.elapsedTime * 0.5;
       // Pulse scale animation
@@ -573,6 +857,19 @@ const Vehicle = React.memo(({
 
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
+    
+    // Don't allow selecting AI vehicles
+    if (vehicle.isAI) {
+      console.log(`[Vehicle ${vehicle.id}] AI vehicle - cannot select`);
+      return;
+    }
+    
+    // Only allow selecting vehicles owned by the current player
+    if (!isOwnedByPlayer) {
+      console.log(`[Vehicle ${vehicle.id}] Not owned by player - cannot select`);
+      return;
+    }
+    
     selectVehicle(vehicle.id);
     
     // Trigger flash effect
@@ -580,16 +877,15 @@ const Vehicle = React.memo(({
     setTimeout(() => setIsFlashing(false), 300);
     
     console.log(`[Vehicle ${vehicle.id}] Clicked - selected`);
-  }, [selectVehicle, vehicle.id]);
+  }, [selectVehicle, vehicle.id, vehicle.isAI, isOwnedByPlayer]);
 
   return (
     <group ref={groupRef} position={[vehiclePosition.x, vehiclePosition.y, vehiclePosition.z]}>
       {/* Vehicle Model */}
-      {scene ? (
+      {adjustedScene ? (
         <primitive 
           ref={meshRef}
-          object={scene}
-          scale={[2, 2, 2]}
+          object={adjustedScene}
           onClick={handleClick}
           onPointerOver={() => setHovered(true)}
           onPointerOut={() => setHovered(false)}
@@ -608,17 +904,24 @@ const Vehicle = React.memo(({
           <meshStandardMaterial 
             color={isFlashing ? "#ffff00" : vehicleColor} 
             emissive={isFlashing ? "#ffff00" : vehicleColor}
-            emissiveIntensity={isFlashing ? 1 : 0.2}
-            metalness={0.6}
-            roughness={0.4}
+            emissiveIntensity={isFlashing ? 1 : 0.1}
+            metalness={0.8}
+            roughness={0.3}
+            envMapIntensity={1.0}
+            // Add procedural bump for vehicle surface detail
+            bumpScale={0.02}
           />
         </mesh>
       )}
       
-      {/* Selection Ring - render on ground level - larger for 4x vehicle */}
+      {/* Selection Ring - render on ground level - sized to 1.2x vehicle length */}
       {(isSelected || hovered) && (
-        <mesh position={[0, -4, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[14, 18, 64]} />
+        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[
+            boundingBoxData.size.z * 0.6,  // Inner radius: 60% of vehicle depth (length)
+            boundingBoxData.size.z * 0.72, // Outer radius: 72% of vehicle depth (20% larger diameter)
+            64
+          ]} />
           <meshBasicMaterial 
             color={isSelected ? "#ff6b35" : "#ffff00"} 
             transparent 
@@ -630,8 +933,8 @@ const Vehicle = React.memo(({
         </mesh>
       )}
       
-      {/* Status indicator - only for selected vehicles - positioned higher for larger vehicle */}
-      {isSelected && (
+      {/* Status indicator - show for selected vehicles or AI vehicles */}
+      {(isSelected || vehicle.isAI) && (
         <>
           <Text
             position={[0, 12, 0]}
@@ -640,7 +943,7 @@ const Vehicle = React.memo(({
             anchorX="center"
             anchorY="middle"
           >
-            {vehicle.name}
+            {vehicle.name} {vehicle.isAI ? '(AI)' : ''}
           </Text>
           
           <Text
@@ -703,46 +1006,141 @@ const Vehicle = React.memo(({
         </group>
       )}
       
-      {/* Animated Arrow Indicator - Always visible */}
-      <group ref={arrowRef} position={[0, 25, 0]}>
-        <mesh rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[5, 10, 8]} />
-          <meshBasicMaterial 
-            color="#00ff00"
-            transparent
-            opacity={0.9}
-          />
+      {/* Debug: Visual Bounding Box */}
+      {showBoundingBox && boundingBoxData && adjustedScene && (
+        <mesh position={[0, boundingBoxData.size.y / 2, 0]}>
+          <boxGeometry args={[boundingBoxData.size.x, boundingBoxData.size.y, boundingBoxData.size.z]} />
+          <meshBasicMaterial color="#00ff00" wireframe transparent opacity={0.5} />
         </mesh>
-        <mesh position={[0, 6, 0]}>
-          <cylinderGeometry args={[2.5, 2.5, 12, 8]} />
-          <meshBasicMaterial 
+      )}
+      
+      {/* Debug: Ground Contact Line */}
+      {showBoundingBox && (
+        <>
+          {/* Green sphere shows pivot point (should be at ground level) */}
+          <mesh position={[0, 0, 0]}>
+            <sphereGeometry args={[0.5, 16, 16]} />
+            <meshBasicMaterial color="#00ff00" />
+          </mesh>
+          
+          {/* Yellow plane shows actual ground level */}
+          <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[20, 0.1]} />
+            <meshBasicMaterial color="#ffff00" />
+          </mesh>
+          
+          {/* Text labels */}
+          <Text
+            position={[0, 3, 0]}
+            fontSize={0.5}
             color="#00ff00"
-            transparent
-            opacity={0.9}
-          />
-        </mesh>
-        {/* Add brighter glow effect */}
-        <pointLight 
-          color="#00ff00"
-          intensity={5}
-          distance={50}
-          decay={1}
-        />
-        {/* Add outer glow mesh */}
-        <mesh>
-          <sphereGeometry args={[8, 16, 16]} />
-          <meshBasicMaterial 
+            anchorX="center"
+            anchorY="middle"
+          >
+            Pivot Point (Bottom Center)
+          </Text>
+          
+          {/* Debug info text */}
+          <Text
+            position={[0, 20, 0]}
+            fontSize={0.8}
+            color="#ffffff"
+            anchorX="center"
+            anchorY="middle"
+          >
+            {`Pivot at Bottom Center | Manual Offset: ${manualOffset.toFixed(2)}`}
+          </Text>
+        </>
+      )}
+      
+      {/* Animated Arrow Indicator - Only for player's own vehicles */}
+      {isOwnedByPlayer && (
+        <group ref={arrowRef} position={[0, 10, 0]}>
+          <mesh rotation={[Math.PI, 0, 0]}>
+            <coneGeometry args={[0.5, 1, 8]} />
+            <meshBasicMaterial 
+              color="#00ff00"
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+          <mesh position={[0, 0.6, 0]}>
+            <cylinderGeometry args={[0.25, 0.25, 1.2, 8]} />
+            <meshBasicMaterial 
+              color="#00ff00"
+              transparent
+              opacity={0.9}
+            />
+          </mesh>
+          {/* Add subtle glow effect */}
+          <pointLight 
             color="#00ff00"
-            transparent
-            opacity={0.2}
+            intensity={2}
+            distance={10}
+            decay={2}
           />
-        </mesh>
-      </group>
+          {/* Add smaller outer glow mesh */}
+          <mesh>
+            <sphereGeometry args={[0.8, 16, 16]} />
+            <meshBasicMaterial 
+              color="#00ff00"
+              transparent
+              opacity={0.2}
+            />
+          </mesh>
+        </group>
+      )}
+      
+      {/* Radar sweep effect for AI vehicles when idle (searching) */}
+      {vehicle.isAI && vehicle.status === 'idle' && (
+        <RadarSweep />
+      )}
     </group>
   );
 });
 
-// Dynamic Time-of-Day Lighting Component
+// PBR Environment Lighting Component
+function PBRLighting() {
+  return (
+    <>
+      {/* HDR Environment Map for realistic lighting and reflections */}
+      <Environment
+        files="/lighting/qwantani_dusk_2_4k.exr"
+        background={false} // Don't use as background, keep space black
+        blur={0.02}
+        resolution={256} // Lower resolution for performance
+      />
+      
+      {/* Main sun light - strong directional light for lunar surface */}
+      <directionalLight
+        position={[50, 100, 30]}
+        intensity={2}
+        color="#ffffff"
+        castShadow
+        shadow-mapSize={[4096, 4096]}
+        shadow-camera-near={0.1}
+        shadow-camera-far={500}
+        shadow-camera-left={-100}
+        shadow-camera-right={100}
+        shadow-camera-top={100}
+        shadow-camera-bottom={-100}
+        shadow-bias={-0.0005}
+      />
+      
+      {/* Subtle fill light from opposite direction */}
+      <directionalLight
+        position={[-30, 50, -20]}
+        intensity={0.3}
+        color="#8899ff"
+      />
+      
+      {/* Ambient light for shadowed areas */}
+      <ambientLight intensity={0.1} color="#ffffff" />
+    </>
+  );
+}
+
+// Dynamic Time-of-Day Lighting Component (keeping for reference but not using)
 function DynamicLighting() {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const [timeOfDay] = useState(0.5); // Fixed at midday (0.5) for permanent daylight
@@ -953,9 +1351,11 @@ const InteractiveGround = React.memo(() => {
   const selectedVehicleId = useSelectedVehicleId();
   const { moveVehicle } = useVehicleActions();
   const { movePlayer } = usePlayerActions();
+  const [clickMarker, setClickMarker] = useState<{ x: number; z: number } | null>(null);
 
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
-    console.log('[InteractiveGround] Clicked at:', event.point);
+    console.log('[InteractiveGround] ===== TERRAIN CLICKED =====');
+    console.log('[InteractiveGround] Click point:', event.point);
     console.log('[InteractiveGround] Connected:', isConnected, 'PlayerId:', myPlayerId, 'SelectedVehicle:', selectedVehicleId);
     
     if (!isConnected || !myPlayerId) {
@@ -965,8 +1365,12 @@ const InteractiveGround = React.memo(() => {
     
     const point = event.point;
     if (point) {
+      // Show click marker
+      setClickMarker({ x: point.x, z: point.z });
+      setTimeout(() => setClickMarker(null), 1000);
+      
       if (selectedVehicleId) {
-        console.log(`[InteractiveGround] Moving vehicle ${selectedVehicleId} to:`, point.x, point.z);
+        console.log(`[InteractiveGround] MOVING VEHICLE ${selectedVehicleId} to:`, point.x, point.z);
         // Move selected vehicle (Y=0 for ground level, Z for forward/back movement)
         moveVehicle(selectedVehicleId, point.x, 0, point.z);
       } else {
@@ -980,7 +1384,7 @@ const InteractiveGround = React.memo(() => {
   return (
     <>
       {/* Terrain */}
-      <Terrain />
+      <Terrain onClick={handleClick} />
       
       {/* Invisible click plane for movement (above terrain) */}
       <mesh 
@@ -992,73 +1396,90 @@ const InteractiveGround = React.memo(() => {
         <planeGeometry args={[400, 400]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
+      
+      {/* Click marker */}
+      {clickMarker && (
+        <mesh position={[
+          clickMarker.x, 
+          (window as any).getTerrainHeight ? (window as any).getTerrainHeight(clickMarker.x, clickMarker.z) + 2 : 2, 
+          clickMarker.z
+        ]}>
+          <sphereGeometry args={[1, 16, 16]} />
+          <meshBasicMaterial color="#00ff00" emissive="#00ff00" emissiveIntensity={0.5} />
+        </mesh>
+      )}
     </>
   );
 });
 
-// Scattered Ores Component
-function ScatteredOres() {
-  const [ores, setOres] = useState<Array<{id: string, position: [number, number, number], rotation: [number, number, number]}>>([]);
+// Server Synced Ores Component
+function ServerOres() {
+  const gameState = useGameState() as AppGameState | null;
+  const [localOres, setLocalOres] = useState<Array<{id: string, position: [number, number, number], rotation: [number, number, number]}>>([]);
   
-  // Generate clumped ore positions on terrain
+  // Convert server ore nodes to local format
   useEffect(() => {
-    const generateOres = () => {
-      const clumpCount = 5; // Number of ore clumps
-      const oresPerClump = 8; // Number of ores in each clump
-      const clumpRadius = 6; // Radius of each clump
-      const newOres = [];
-      let oreId = 0;
-      
-      for (let clump = 0; clump < clumpCount; clump++) {
-        // Random center position for each clump within terrain bounds
-        const centerX = (Math.random() - 0.5) * 160; // Keep clumps away from edges
-        const centerZ = (Math.random() - 0.5) * 160;
-        
-        // Generate ores within this clump
-        for (let ore = 0; ore < oresPerClump; ore++) {
-          // Position ores in a circular pattern around the center
-          const angle = (ore / oresPerClump) * Math.PI * 2;
-          const distance = Math.random() * clumpRadius;
-          
-          // Add some randomness to avoid perfect circles
-          const randomOffset = (Math.random() - 0.5) * 2;
-          
-          const x = centerX + Math.cos(angle) * distance + randomOffset;
-          const z = centerZ + Math.sin(angle) * distance + randomOffset;
-          
-          // Get terrain height at this position
-          const getHeight = (window as any).getTerrainHeight;
-          const y = getHeight ? getHeight(x, z) + 0.5 : 0.5;
-          
-          // Generate random rotation for variety
-          const rotationX = Math.random() * Math.PI * 2;
-          const rotationY = Math.random() * Math.PI * 2;
-          const rotationZ = Math.random() * Math.PI * 2;
-          
-          newOres.push({
-            id: `ore_${oreId++}`,
-            position: [x, y, z] as [number, number, number],
-            rotation: [rotationX, rotationY, rotationZ] as [number, number, number]
-          });
-        }
-      }
-      
-      setOres(newOres);
-    };
+    if (!gameState?.oreNodes) {
+      return;
+    }
     
-    // Wait a bit for terrain to initialize
-    const timer = setTimeout(generateOres, 1000);
-    return () => clearTimeout(timer);
-  }, []);
+    const ores: Array<{id: string, position: [number, number, number], rotation: [number, number, number]}> = [];
+    
+    // Handle MapSchema properly
+    if (gameState.oreNodes.forEach) {
+      // It's a MapSchema
+      gameState.oreNodes.forEach((ore: any, oreId: string) => {
+        // Get terrain height at ore position
+        const getHeight = (window as any).getTerrainHeight;
+        const y = getHeight ? getHeight(ore.x, ore.z) + 0.5 : ore.y + 0.5;
+        
+        // Generate random rotation for variety
+        const seed = oreId.charCodeAt(0) + oreId.charCodeAt(1) * 256;
+        const rotationX = (seed % 100) / 100 * Math.PI * 2;
+        const rotationY = ((seed * 7) % 100) / 100 * Math.PI * 2;
+        const rotationZ = ((seed * 13) % 100) / 100 * Math.PI * 2;
+        
+        ores.push({
+          id: oreId,
+          position: [ore.x, y, ore.z] as [number, number, number],
+          rotation: [rotationX, rotationY, rotationZ] as [number, number, number]
+        });
+      });
+    } else {
+      // Fallback to Object.entries
+      Object.entries(gameState.oreNodes).forEach(([oreId, ore]) => {
+        // Get terrain height at ore position
+        const getHeight = (window as any).getTerrainHeight;
+        const y = getHeight ? getHeight(ore.x, ore.z) + 0.5 : ore.y + 0.5;
+        
+        // Generate random rotation for variety
+        const seed = oreId.charCodeAt(0) + oreId.charCodeAt(1) * 256;
+        const rotationX = (seed % 100) / 100 * Math.PI * 2;
+        const rotationY = ((seed * 7) % 100) / 100 * Math.PI * 2;
+        const rotationZ = ((seed * 13) % 100) / 100 * Math.PI * 2;
+        
+        ores.push({
+          id: oreId,
+          position: [ore.x, y, ore.z] as [number, number, number],
+          rotation: [rotationX, rotationY, rotationZ] as [number, number, number]
+        });
+      });
+    }
+    
+    setLocalOres(ores);
+    console.log(`[ServerOres] Synced ${ores.length} ore nodes from server`);
+  }, [gameState?.oreNodes]);
   
   // Remove mined ore
   const handleOreMined = (oreId: string) => {
-    setOres(prev => prev.filter(ore => ore.id !== oreId));
+    // For server-synced ores, we don't handle removal locally
+    // The server will update the ore state
+    console.log(`[ServerOres] Ore ${oreId} mined - waiting for server update`);
   };
   
   return (
     <>
-      {ores.map(ore => (
+      {localOres.map(ore => (
         <Ore 
           key={ore.id}
           id={ore.id}
@@ -1167,7 +1588,7 @@ const Scene3D = React.memo(() => {
           position: [10, 10, 10], 
           fov: 50
         }}
-        style={{ background: 'linear-gradient(to bottom, #1a1a2e 0%, #0f0f23 100%)' }}
+        style={{ background: 'linear-gradient(to bottom, #000000 0%, #0a0a0a 100%)' }}
         onCreated={(state) => {
           console.log('[Scene3D] Canvas created - renderer:', state.gl);
         }}
@@ -1175,8 +1596,22 @@ const Scene3D = React.memo(() => {
           console.error('[Scene3D] Canvas error:', error);
         }}
       >
-        {/* Dynamic Time-of-Day Lighting */}
-        <DynamicLighting />
+        {/* PBR Environment Lighting */}
+        <PBRLighting />
+        
+        {/* Add fog for lunar atmosphere effect */}
+        <fog attach="fog" args={['#000000', 50, 300]} />
+        
+        {/* Starfield background */}
+        <Stars 
+          radius={300} 
+          depth={50} 
+          count={5000} 
+          factor={4} 
+          saturation={0} 
+          fade 
+          speed={0.5}
+        />
         
         {/* Isometric Camera Controller */}
         <IsometricCameraController />
@@ -1200,8 +1635,8 @@ const Scene3D = React.memo(() => {
         {/* Interactive Ground */}
         <InteractiveGround />
         
-        {/* Scattered Ores */}
-        <ScatteredOres />
+        {/* Server Synced Ores */}
+        <ServerOres />
         
         {/* Render All Players */}
         {players.map(([playerId, playerData]) => {
@@ -1218,11 +1653,13 @@ const Scene3D = React.memo(() => {
         {/* Render All Vehicles */}
         {vehicles.map(([vehicleId, vehicleData]) => {
           const vehicle = vehicleData as Vehicle;
+          const isMyVehicle = vehicle.ownerId === myPlayerId;
           return (
             <Vehicle
               key={vehicleId}
               vehicle={vehicle}
               isSelected={vehicleId === selectedVehicleId}
+              isOwnedByPlayer={isMyVehicle}
             />
           );
         })}

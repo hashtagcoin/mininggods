@@ -101,8 +101,13 @@ const MinimapVehicle = React.memo(({
     onClick(vehicle.id);
   }, [onClick, vehicle.id]);
 
-  // Get color based on vehicle type
+  // Get color based on vehicle type and AI status
   const getVehicleColor = (type: string) => {
+    // AI vehicles have a distinct color
+    if (vehicle.isAI) {
+      return '#00ff00'; // Bright green for AI
+    }
+    
     switch (type) {
       case 'miner': return '#ff6b35';
       case 'hauler': return '#4dabf7';
@@ -182,7 +187,7 @@ const MinimapVehicle = React.memo(({
         outlineWidth={0.1}
         outlineColor="#000000"
       >
-        {vehicle.name}
+        {vehicle.name} {vehicle.isAI ? '(AI)' : ''}
       </Text>
     </group>
   );
